@@ -1,0 +1,87 @@
+services:
+  # ─── Infrastructure ───────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - loopsec-net
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: loopsec
+      POSTGRES_PASSWORD: loopsec
+      POSTGRES_DB: loopsec
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - loopsec-net
+
+  # ─── Security Tools ──────────────────────────────────
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    command: >
+      zap.sh -daemon
+      -host 0.0.0.0 -port 8080
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+      -config api.disablekey=true
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/JSON/core/view/version/"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - loopsec-net
+
+  # ─── Vulnerable Test App ─────────────────────────────
+  vuln-app:
+    build:
+      context: ./test-targets/vuln-app
+    ports:
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5001/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - loopsec-net
+
+  # ─── Test Targets (Intentionally Vulnerable) ─────────
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    ports:
+      - "3000:3000"
+    networks:
+      - loopsec-net
+
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    ports:
+      - "8081:80"
+    environment:
+      RECAPTCHA_PRIV_KEY: ""
+      RECAPTCHA_PUB_KEY: ""
+    networks:
+      - loopsec-net
+
+volumes:
+  pgdata:
+
+networks:
+  loopsec-net:
+    driver: bridge

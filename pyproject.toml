@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loopsec"
+version = "0.1.0"
+description = "Open-source closed-loop AI security agent: Scan → Attack → Map → Fix → Verify"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.12"
+dependencies = [
+    "litellm>=1.40.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "pydantic>=2.7.0",
+    "rich>=13.7.0",
+    "typer>=0.12.0",
+    "docker>=7.1.0",
+    "celery[redis]>=5.4.0",
+    "sqlalchemy>=2.0.30",
+    "psycopg2-binary>=2.9.9",
+    "redis>=5.0.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0.1",
+    "jinja2>=3.1.4",
+    "GitPython>=3.1.43",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+loopsec = "loopsec.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["loopsec*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
