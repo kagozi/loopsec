@@ -1,0 +1,240 @@
+name: "LoopSec Security Scan"
+description: "Closed-loop AI security agent: Scan → Attack → Map → Fix → Verify"
+author: "LoopSec"
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  openai-api-key:
+    description: "OpenAI API key for LLM-powered analysis and patching"
+    required: false
+  anthropic-api-key:
+    description: "Anthropic API key (alternative to OpenAI)"
+    required: false
+  github-token:
+    description: "GitHub token for creating PRs and posting comments"
+    required: true
+    default: ${{ github.token }}
+  model:
+    description: "LLM model to use (e.g. gpt-4o, gpt-4o-mini, claude-sonnet-4-20250514)"
+    required: false
+    default: "gpt-4o-mini"
+  scan-mode:
+    description: "Scan mode: 'full' (SAST+DAST+Fix), 'sast' (static only), 'report' (scan only, no fix)"
+    required: false
+    default: "full"
+  create-pr:
+    description: "Create a fix PR with patches (true/false)"
+    required: false
+    default: "true"
+  fail-on-high:
+    description: "Fail the check if critical/high findings remain unfixed (true/false)"
+    required: false
+    default: "true"
+  app-url:
+    description: "URL of deployed app for DAST scanning (optional — auto-deploys if not set)"
+    required: false
+  extra-args:
+    description: "Additional arguments to pass to loopsec scan"
+    required: false
+
+outputs:
+  findings-count:
+    description: "Total number of findings"
+    value: ${{ steps.scan.outputs.findings }}
+  critical-count:
+    description: "Number of critical/high findings"
+    value: ${{ steps.scan.outputs.critical }}
+  patches-count:
+    description: "Number of patches generated"
+    value: ${{ steps.scan.outputs.patches }}
+  verified-count:
+    description: "Number of verified fixes"
+    value: ${{ steps.scan.outputs.verified }}
+  pr-url:
+    description: "URL of the created fix PR (if any)"
+    value: ${{ steps.pr.outputs.pr_url }}
+  report-path:
+    description: "Path to the generated report"
+    value: ${{ steps.scan.outputs.report_path }}
+
+runs:
+  using: "composite"
+  steps:
+    # ─── Setup ────────────────────────────────────
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install LoopSec
+      shell: bash
+      run: |
+        pip install --upgrade pip
+        pip install "git+https://github.com/${{ github.action_repository || 'kagozi/loopsec' }}.git"
+        pip install semgrep
+        loopsec version
+
+    - name: Install Gitleaks
+      shell: bash
+      run: |
+        curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_$(uname -s)_$(uname -m | sed 's/x86_64/x64/').tar.gz | tar -xz
+        sudo mv gitleaks /usr/local/bin/ || mv gitleaks $HOME/.local/bin/
+        gitleaks version || true
+
+    - name: Start ZAP (DAST mode)
+      if: inputs.scan-mode == 'full'
+      shell: bash
+      run: |
+        docker run -d --name zap \
+          --network host \
+          -p 8080:8080 \
+          ghcr.io/zaproxy/zaproxy:stable \
+          zap.sh -daemon \
+          -host 0.0.0.0 -port 8080 \
+          -config api.addrs.addr.name=.* \
+          -config api.addrs.addr.regex=true \
+          -config api.disablekey=true
+        echo "Waiting for ZAP to start..."
+        for i in $(seq 1 30); do
+          curl -sf http://localhost:8080/JSON/core/view/version/ && break
+          sleep 2
+        done
+
+    # ─── Scan ─────────────────────────────────────
+    - name: Run LoopSec scan
+      id: scan
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        LOOPSEC_LLM_MODEL: ${{ inputs.model }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        # Build command
+        CMD="loopsec scan --repo ${{ github.workspace }}"
+
+        # Add app URL if provided
+        if [ -n "${{ inputs.app-url }}" ]; then
+          CMD="$CMD --url ${{ inputs.app-url }}"
+        fi
+
+        # Add model
+        if [ -n "${{ inputs.model }}" ]; then
+          CMD="$CMD --model ${{ inputs.model }}"
+        fi
+
+        # Configure scan mode
+        if [ "${{ inputs.scan-mode }}" = "sast" ]; then
+          CMD="$CMD --skip attacker verifier --no-deploy"
+        elif [ "${{ inputs.scan-mode }}" = "report" ]; then
+          CMD="$CMD --skip fixer verifier --no-deploy"
+        fi
+
+        # Extra args
+        if [ -n "${{ inputs.extra-args }}" ]; then
+          CMD="$CMD ${{ inputs.extra-args }}"
+        fi
+
+        # Run scan (don't fail yet — we handle exit code ourselves)
+        echo "Running: $CMD"
+        set +e
+        $CMD --output loopsec-report.md 2>&1 | tee loopsec-output.log
+        SCAN_EXIT=$?
+        set -e
+
+        # Parse results from the JSON report
+        REPORT_JSON="loopsec-report.json"
+        if [ -f "$REPORT_JSON" ]; then
+          FINDINGS=$(python3 -c "import json; d=json.load(open('$REPORT_JSON')); print(len(d.get('findings',[])))" 2>/dev/null || echo "0")
+          PATCHES=$(python3 -c "import json; d=json.load(open('$REPORT_JSON')); print(len(d.get('patches',[])))" 2>/dev/null || echo "0")
+          VERIFIED=$(python3 -c "import json; d=json.load(open('$REPORT_JSON')); print(sum(1 for p in d.get('patches',[]) if p.get('status')=='verified'))" 2>/dev/null || echo "0")
+          CRITICAL=$(python3 -c "
+        import json
+        d=json.load(open('$REPORT_JSON'))
+        print(sum(1 for f in d.get('findings',[]) if f.get('severity') in ('critical','high')))
+        " 2>/dev/null || echo "0")
+        else
+          FINDINGS=0; PATCHES=0; VERIFIED=0; CRITICAL=0
+        fi
+
+        echo "findings=$FINDINGS" >> $GITHUB_OUTPUT
+        echo "patches=$PATCHES" >> $GITHUB_OUTPUT
+        echo "verified=$VERIFIED" >> $GITHUB_OUTPUT
+        echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+        echo "report_path=loopsec-report.md" >> $GITHUB_OUTPUT
+        echo "scan_exit=$SCAN_EXIT" >> $GITHUB_OUTPUT
+
+        echo "## LoopSec Results" >> $GITHUB_STEP_SUMMARY
+        echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Total Findings | $FINDINGS |" >> $GITHUB_STEP_SUMMARY
+        echo "| Critical/High | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+        echo "| Patches Generated | $PATCHES |" >> $GITHUB_STEP_SUMMARY
+        echo "| Verified Fixes | $VERIFIED |" >> $GITHUB_STEP_SUMMARY
+
+    # ─── Create Fix PR ────────────────────────────
+    - name: Create fix PR
+      id: pr
+      if: inputs.create-pr == 'true' && steps.scan.outputs.patches != '0'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: |
+        PR_URL=$(loopsec github-scan ${{ github.repository }} \
+          --create-pr \
+          --branch ${{ github.head_ref || github.ref_name }} \
+          --github-token $GITHUB_TOKEN \
+          --model ${{ inputs.model }} 2>&1 | grep -o 'https://github.com/[^ ]*pull/[0-9]*' || echo "")
+
+        echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+        if [ -n "$PR_URL" ]; then
+          echo "✅ Fix PR created: $PR_URL" >> $GITHUB_STEP_SUMMARY
+        fi
+
+    # ─── Post PR Comment ──────────────────────────
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        if [ -f loopsec-report.md ]; then
+          # Truncate to fit GitHub comment limits (65536 chars)
+          BODY=$(head -c 60000 loopsec-report.md)
+
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "$BODY" \
+            --repo ${{ github.repository }} || true
+        fi
+
+    # ─── Upload Report ────────────────────────────
+    - name: Upload report artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: loopsec-report
+        path: |
+          loopsec-report.md
+          loopsec-report.json
+        retention-days: 30
+
+    # ─── Cleanup ──────────────────────────────────
+    - name: Stop ZAP
+      if: always() && inputs.scan-mode == 'full'
+      shell: bash
+      run: docker stop zap 2>/dev/null || true
+
+    # ─── Fail Check ───────────────────────────────
+    - name: Check for critical findings
+      if: inputs.fail-on-high == 'true'
+      shell: bash
+      run: |
+        CRITICAL=${{ steps.scan.outputs.critical }}
+        if [ "$CRITICAL" -gt "0" ]; then
+          echo "❌ $CRITICAL critical/high findings remain unfixed"
+          exit 1
+        fi

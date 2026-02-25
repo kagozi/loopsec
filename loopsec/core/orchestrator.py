@@ -50,6 +50,8 @@ class Orchestrator:
             FixerAgent(llm=self.llm),
             VerifierAgent(llm=self.llm),
         ]
+        self._sandbox = None
+        self._sandbox_info = None
 
     def run(
         self,
@@ -57,20 +59,26 @@ class Orchestrator:
         app_url: str | None = None,
         branch: str = "main",
         skip_agents: list[str] | None = None,
+        auto_deploy: bool = True,
     ) -> PipelineState:
         """
         Execute the full pipeline.
 
         Args:
             repo_path: Path to the source code repository
-            app_url: URL of the deployed application (optional for SAST-only)
+            app_url: URL of the deployed application (optional — will auto-deploy if not given)
             branch: Git branch to scan
             skip_agents: List of agent names to skip (e.g., ["attacker", "verifier"])
+            auto_deploy: If True and no app_url, try to auto-deploy via Docker sandbox
 
         Returns:
             PipelineState with all findings, exploits, patches, and verification results
         """
         skip = set(skip_agents or [])
+
+        # Auto-deploy if no URL and DAST agents aren't skipped
+        if not app_url and auto_deploy and "attacker" not in skip:
+            app_url = self._try_auto_deploy(repo_path)
 
         # Initialize state
         state = PipelineState(
@@ -84,27 +92,31 @@ class Orchestrator:
         # Banner
         self._print_banner(state)
 
-        # Run each agent in sequence
-        for agent in self.agents:
-            if agent.name in skip:
-                console.print(f"\n[dim]⏭ Skipping {agent.name} agent[/dim]")
-                continue
+        try:
+            # Run each agent in sequence
+            for agent in self.agents:
+                if agent.name in skip:
+                    console.print(f"\n[dim]⏭ Skipping {agent.name} agent[/dim]")
+                    continue
 
-            # Skip DAST agents if no app URL
-            if agent.name in ("attacker", "verifier") and not app_url:
-                console.print(
-                    f"\n[dim]⏭ Skipping {agent.name} (no app URL)[/dim]"
-                )
-                continue
+                # Skip DAST agents if no app URL
+                if agent.name in ("attacker", "verifier") and not app_url:
+                    console.print(
+                        f"\n[dim]⏭ Skipping {agent.name} (no app URL)[/dim]"
+                    )
+                    continue
 
-            state = agent.execute(state)
+                state = agent.execute(state)
 
-            # Bail on critical errors
-            if state.status == PipelineStatus.ERRORED:
-                console.print(
-                    f"\n[bold red]Pipeline stopped due to errors in {agent.name}[/bold red]"
-                )
-                break
+                # Bail on critical errors
+                if state.status == PipelineStatus.ERRORED:
+                    console.print(
+                        f"\n[bold red]Pipeline stopped due to errors in {agent.name}[/bold red]"
+                    )
+                    break
+        finally:
+            # Always clean up sandbox
+            self._teardown_sandbox()
 
         # Finalize
         state.status = PipelineStatus.COMPLETE
@@ -114,6 +126,40 @@ class Orchestrator:
         self._print_summary(state)
 
         return state
+
+    def _try_auto_deploy(self, repo_path: str) -> str | None:
+        """Try to auto-deploy the app via Docker sandbox."""
+        try:
+            from loopsec.sandbox.manager import SandboxManager
+
+            console.print("\n[dim]🐳 No app URL provided — attempting auto-deploy via Docker...[/dim]")
+            self._sandbox = SandboxManager()
+            self._sandbox_info = self._sandbox.deploy(repo_path)
+            console.print(
+                f"[green]✓ App deployed: {self._sandbox_info.external_url}[/green]"
+                f"[dim] (type: {self._sandbox_info.app_type.value},"
+                f" container: {self._sandbox_info.container_name})[/dim]"
+            )
+            # Return the internal URL for ZAP (Docker-to-Docker)
+            return self._sandbox_info.internal_url
+        except ImportError:
+            logger.debug("Docker SDK not installed, skipping auto-deploy")
+            return None
+        except Exception as e:
+            console.print(f"[yellow]⚠ Auto-deploy failed: {e}[/yellow]")
+            console.print("[dim]  Continuing with SAST-only scan. Use --url to specify a running app.[/dim]")
+            return None
+
+    def _teardown_sandbox(self) -> None:
+        """Clean up the sandbox container if one was created."""
+        if self._sandbox and self._sandbox_info:
+            try:
+                console.print(f"\n[dim]🐳 Tearing down sandbox: {self._sandbox_info.container_name}[/dim]")
+                self._sandbox.teardown(self._sandbox_info.container_id)
+            except Exception as e:
+                logger.warning(f"Sandbox teardown failed: {e}")
+            self._sandbox = None
+            self._sandbox_info = None
 
     def _print_banner(self, state: PipelineState) -> None:
         banner = Text()

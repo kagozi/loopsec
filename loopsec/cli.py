@@ -47,6 +47,7 @@ def scan(
     skip: Optional[list[str]] = typer.Option(None, "--skip", "-s", help="Agents to skip"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output report path"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model override"),
+    no_deploy: bool = typer.Option(False, "--no-deploy", help="Disable auto-deploy via Docker sandbox"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
 ) -> None:
     """Run the full security scan pipeline."""
@@ -72,6 +73,7 @@ def scan(
         app_url=url,
         branch=branch,
         skip_agents=skip or [],
+        auto_deploy=not no_deploy,
     )
 
     # Generate report
