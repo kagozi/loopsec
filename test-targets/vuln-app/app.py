@@ -1,4 +1,3 @@
-
 """
 Deliberately Vulnerable Flask App — FOR TESTING ONLY
 DO NOT deploy this anywhere public. It contains intentional security flaws.
@@ -119,9 +118,9 @@ def get_notes():
     user_id = request.args.get("user_id", "1")
 
     db = get_db()
-    # FIX: Use parameterized query to prevent SQL injection
-    query = "SELECT * FROM notes WHERE user_id = ?"
-    cursor = db.execute(query, (user_id,))
+    # BAD: No authorization check — any user can read any user's notes (IDOR)
+    query = f"SELECT * FROM notes WHERE user_id = {user_id}"
+    cursor = db.execute(query)
     notes = [{"id": r[0], "title": r[2], "content": r[3]} for r in cursor.fetchall()]
 
     return jsonify(notes)
@@ -134,8 +133,8 @@ def get_notes():
 def ping():
     host = request.args.get("host", "localhost")
 
-    # BAD: Unsanitized user input in shell command
-    result = subprocess.check_output(f"ping -c 1 {host}", shell=True, text=True)
+    # FIX: Use a list to pass arguments to subprocess to avoid shell=True
+    result = subprocess.check_output(["ping", "-c", "1", host], text=True)
     return jsonify({"output": result})
 
 
@@ -143,8 +142,8 @@ def ping():
 def dns_lookup():
     domain = request.json.get("domain", "") if request.json else ""
 
-    # BAD: Command injection via os.popen
-    output = os.popen(f"nslookup {domain}").read()
+    # FIX: Use subprocess with a list to avoid shell=True
+    output = subprocess.check_output(["nslookup", domain], text=True)
     return jsonify({"result": output})
 
 
@@ -225,4 +224,3 @@ def index():
 if __name__ == "__main__":
     os.makedirs("uploads", exist_ok=True)
     app.run(host="0.0.0.0", port=5001, debug=True)
-
