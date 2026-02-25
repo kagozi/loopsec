@@ -1,4 +1,3 @@
-
 """
 Deliberately Vulnerable Flask App — FOR TESTING ONLY
 DO NOT deploy this anywhere public. It contains intentional security flaws.
@@ -69,7 +68,7 @@ def login():
     password = request.form.get("password", "")
 
     db = get_db()
-    # FIX: Use parameterized query to prevent SQL injection
+    # FIXED: Use parameterized query to prevent SQL injection
     query = "SELECT * FROM users WHERE username=? AND password=?"
     cursor = db.execute(query, (username, password))
     user = cursor.fetchone()
@@ -84,9 +83,9 @@ def search_users():
     search = request.args.get("q", "")
 
     db = get_db()
-    # BAD: SQL injection via search parameter
-    query = "SELECT id, username, email FROM users WHERE username LIKE '%" + search + "%'"
-    cursor = db.execute(query)
+    # FIXED: Use parameterized query to prevent SQL injection
+    query = "SELECT id, username, email FROM users WHERE username LIKE ?"
+    cursor = db.execute(query, ('%' + search + '%',))
     users = [{"id": r[0], "username": r[1], "email": r[2]} for r in cursor.fetchall()]
 
     return jsonify(users)
@@ -225,4 +224,3 @@ def index():
 if __name__ == "__main__":
     os.makedirs("uploads", exist_ok=True)
     app.run(host="0.0.0.0", port=5001, debug=True)
-
