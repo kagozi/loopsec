@@ -69,9 +69,9 @@ def login():
     password = request.form.get("password", "")
 
     db = get_db()
-    # FIX: Use parameterized query to prevent SQL injection
-    query = "SELECT * FROM users WHERE username=? AND password=?"
-    cursor = db.execute(query, (username, password))
+    # BAD: String concatenation in SQL query
+    query = f"SELECT * FROM users WHERE username='{username}' AND password='{password}'"
+    cursor = db.execute(query)
     user = cursor.fetchone()
 
     if user:
