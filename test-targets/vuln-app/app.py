@@ -1,4 +1,3 @@
-
 """
 Deliberately Vulnerable Flask App — FOR TESTING ONLY
 DO NOT deploy this anywhere public. It contains intentional security flaws.
@@ -86,7 +85,7 @@ def search_users():
     db = get_db()
     # FIX: Use parameterized query to prevent SQL injection
     query = "SELECT id, username, email FROM users WHERE username LIKE ?"
-    cursor = db.execute(query, ('%' + search + '%',))
+    cursor = db.execute(query, (f'%{search}%',))
     users = [{"id": r[0], "username": r[1], "email": r[2]} for r in cursor.fetchall()]
 
     return jsonify(users)
