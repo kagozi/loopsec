@@ -133,8 +133,8 @@ def get_notes():
 def ping():
     host = request.args.get("host", "localhost")
 
-    # FIX: Use a list to pass arguments to subprocess to avoid shell=True
-    result = subprocess.check_output(["ping", "-c", "1", host], text=True)
+    # FIXED: Use subprocess.run with a list to avoid shell=True
+    result = subprocess.run(["ping", "-c", "1", host], capture_output=True, text=True).stdout
     return jsonify({"output": result})
 
 
@@ -142,8 +142,8 @@ def ping():
 def dns_lookup():
     domain = request.json.get("domain", "") if request.json else ""
 
-    # FIX: Use subprocess with a list to avoid shell=True
-    output = subprocess.check_output(["nslookup", domain], text=True)
+    # FIXED: Use subprocess.run with a list to avoid shell=True
+    output = subprocess.run(["nslookup", domain], capture_output=True, text=True).stdout
     return jsonify({"result": output})
 
 
