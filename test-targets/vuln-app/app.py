@@ -18,9 +18,8 @@ import pickle
 import sqlite3
 import subprocess
 import base64
-import json
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
 
@@ -173,10 +172,10 @@ def read_file():
 def import_data():
     data = request.form.get("data", "")
 
-    # FIX: Use JSON instead of pickle for deserialization
+    # BAD: Deserializing untrusted user input with pickle
     try:
         decoded = base64.b64decode(data)
-        obj = json.loads(decoded)
+        obj = pickle.loads(decoded)
         return jsonify({"status": "imported", "type": str(type(obj))})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -199,27 +198,8 @@ def debug_info():
 
 @app.route("/")
 def index():
-    return render_template_string("""
-    <html>
-    <head><title>VulnApp — Test Target</title></head>
-    <body>
-        <h1>VulnApp — Deliberately Vulnerable</h1>
-        <p>This app contains intentional security vulnerabilities for testing.</p>
-        <h3>Endpoints:</h3>
-        <ul>
-            <li>POST /api/login — SQL Injection</li>
-            <li>GET /api/users?q= — SQL Injection</li>
-            <li>GET /search?q= — XSS</li>
-            <li>GET /api/notes?user_id= — IDOR</li>
-            <li>GET /api/ping?host= — Command Injection</li>
-            <li>POST /api/lookup — Command Injection</li>
-            <li>GET /api/files?name= — Path Traversal</li>
-            <li>POST /api/import — Insecure Deserialization</li>
-            <li>GET /api/debug — Info Exposure</li>
-        </ul>
-    </body>
-    </html>
-    """)
+    # FIX: Use render_template instead of render_template_string to avoid template injection
+    return render_template("index.html")
 
 
 if __name__ == "__main__":
