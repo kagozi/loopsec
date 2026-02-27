@@ -1,4 +1,3 @@
-
 """
 Deliberately Vulnerable Flask App — FOR TESTING ONLY
 DO NOT deploy this anywhere public. It contains intentional security flaws.
@@ -20,7 +19,7 @@ import sqlite3
 import subprocess
 import base64
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template
 
 app = Flask(__name__)
 
@@ -134,8 +133,8 @@ def get_notes():
 def ping():
     host = request.args.get("host", "localhost")
 
-    # FIX: Use subprocess.run with a list to avoid shell=True
-    result = subprocess.run(["ping", "-c", "1", host], capture_output=True, text=True).stdout
+    # BAD: Unsanitized user input in shell command
+    result = subprocess.check_output(f"ping -c 1 {host}", shell=True, text=True)
     return jsonify({"output": result})
 
 
@@ -143,8 +142,8 @@ def ping():
 def dns_lookup():
     domain = request.json.get("domain", "") if request.json else ""
 
-    # FIX: Use subprocess.run with a list to avoid shell=True
-    output = subprocess.run(["nslookup", domain], capture_output=True, text=True).stdout
+    # BAD: Command injection via os.popen
+    output = os.popen(f"nslookup {domain}").read()
     return jsonify({"result": output})
 
 
@@ -199,30 +198,10 @@ def debug_info():
 
 @app.route("/")
 def index():
-    return render_template_string("""
-    <html>
-    <head><title>VulnApp — Test Target</title></head>
-    <body>
-        <h1>VulnApp — Deliberately Vulnerable</h1>
-        <p>This app contains intentional security vulnerabilities for testing.</p>
-        <h3>Endpoints:</h3>
-        <ul>
-            <li>POST /api/login — SQL Injection</li>
-            <li>GET /api/users?q= — SQL Injection</li>
-            <li>GET /search?q= — XSS</li>
-            <li>GET /api/notes?user_id= — IDOR</li>
-            <li>GET /api/ping?host= — Command Injection</li>
-            <li>POST /api/lookup — Command Injection</li>
-            <li>GET /api/files?name= — Path Traversal</li>
-            <li>POST /api/import — Insecure Deserialization</li>
-            <li>GET /api/debug — Info Exposure</li>
-        </ul>
-    </body>
-    </html>
-    """)
+    # FIX: Use render_template instead of render_template_string to prevent template injection
+    return render_template("index.html")
 
 
 if __name__ == "__main__":
     os.makedirs("uploads", exist_ok=True)
     app.run(host="0.0.0.0", port=5001, debug=True)
-
