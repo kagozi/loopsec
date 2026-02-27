@@ -19,6 +19,7 @@ import pickle
 import sqlite3
 import subprocess
 import base64
+import json
 
 from flask import Flask, request, jsonify, render_template_string
 
@@ -134,8 +135,8 @@ def get_notes():
 def ping():
     host = request.args.get("host", "localhost")
 
-    # FIX: Use a list to pass arguments to subprocess to avoid shell=True
-    result = subprocess.check_output(["ping", "-c", "1", host], text=True)
+    # BAD: Unsanitized user input in shell command
+    result = subprocess.check_output(f"ping -c 1 {host}", shell=True, text=True)
     return jsonify({"output": result})
 
 
@@ -143,8 +144,8 @@ def ping():
 def dns_lookup():
     domain = request.json.get("domain", "") if request.json else ""
 
-    # FIX: Use subprocess with a list to avoid shell=True
-    output = subprocess.check_output(["nslookup", domain], text=True)
+    # BAD: Command injection via os.popen
+    output = os.popen(f"nslookup {domain}").read()
     return jsonify({"result": output})
 
 
@@ -173,10 +174,10 @@ def read_file():
 def import_data():
     data = request.form.get("data", "")
 
-    # BAD: Deserializing untrusted user input with pickle
+    # FIX: Use JSON for deserialization instead of pickle
     try:
         decoded = base64.b64decode(data)
-        obj = pickle.loads(decoded)
+        obj = json.loads(decoded)
         return jsonify({"status": "imported", "type": str(type(obj))})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
