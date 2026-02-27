@@ -18,7 +18,6 @@ import pickle
 import sqlite3
 import subprocess
 import base64
-import json
 
 from flask import Flask, request, jsonify, render_template_string
 
@@ -173,10 +172,10 @@ def read_file():
 def import_data():
     data = request.form.get("data", "")
 
-    # FIX: Use JSON for deserialization instead of pickle
+    # BAD: Deserializing untrusted user input with pickle
     try:
         decoded = base64.b64decode(data)
-        obj = json.loads(decoded)
+        obj = pickle.loads(decoded)
         return jsonify({"status": "imported", "type": str(type(obj))})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -224,4 +223,5 @@ def index():
 
 if __name__ == "__main__":
     os.makedirs("uploads", exist_ok=True)
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    # FIX: Changed host to '127.0.0.1' to prevent public exposure
+    app.run(host="127.0.0.1", port=5001, debug=True)
