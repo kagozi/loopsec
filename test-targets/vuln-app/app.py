@@ -1,3 +1,4 @@
+
 """
 Deliberately Vulnerable Flask App — FOR TESTING ONLY
 DO NOT deploy this anywhere public. It contains intentional security flaws.
@@ -133,8 +134,8 @@ def get_notes():
 def ping():
     host = request.args.get("host", "localhost")
 
-    # BAD: Unsanitized user input in shell command
-    result = subprocess.check_output(f"ping -c 1 {host}", shell=True, text=True)
+    # FIX: Use a list to pass arguments to subprocess to avoid shell=True
+    result = subprocess.check_output(["ping", "-c", "1", host], text=True)
     return jsonify({"output": result})
 
 
@@ -142,8 +143,8 @@ def ping():
 def dns_lookup():
     domain = request.json.get("domain", "") if request.json else ""
 
-    # BAD: Command injection via os.popen
-    output = os.popen(f"nslookup {domain}").read()
+    # FIX: Use subprocess to safely execute command without shell=True
+    output = subprocess.check_output(["nslookup", domain], text=True)
     return jsonify({"result": output})
 
 
