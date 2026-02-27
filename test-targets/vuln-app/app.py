@@ -19,7 +19,6 @@ import pickle
 import sqlite3
 import subprocess
 import base64
-import json
 
 from flask import Flask, request, jsonify, render_template_string
 
@@ -120,9 +119,9 @@ def get_notes():
     user_id = request.args.get("user_id", "1")
 
     db = get_db()
-    # BAD: No authorization check — any user can read any user's notes (IDOR)
-    query = f"SELECT * FROM notes WHERE user_id = {user_id}"
-    cursor = db.execute(query)
+    # FIX: Use parameterized query to prevent SQL injection
+    query = "SELECT * FROM notes WHERE user_id = ?"
+    cursor = db.execute(query, (user_id,))
     notes = [{"id": r[0], "title": r[2], "content": r[3]} for r in cursor.fetchall()]
 
     return jsonify(notes)
@@ -174,10 +173,10 @@ def read_file():
 def import_data():
     data = request.form.get("data", "")
 
-    # FIX: Use JSON for deserialization instead of pickle
+    # BAD: Deserializing untrusted user input with pickle
     try:
         decoded = base64.b64decode(data)
-        obj = json.loads(decoded)
+        obj = pickle.loads(decoded)
         return jsonify({"status": "imported", "type": str(type(obj))})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
