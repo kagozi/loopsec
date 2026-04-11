@@ -86,7 +86,7 @@ jobs:
 #     timeout-minutes: 60
 #     steps:
 #       - uses: actions/checkout@v4
-#       - uses: kagozi/loopsec/action@main
+#       - uses: kagozi/loopsec/action@master
 #         with:
 #           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 #           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -146,7 +146,7 @@ jobs:
 #     timeout-minutes: 60
 #     steps:
 #       - uses: actions/checkout@v4
-#       - uses: kagozi/loopsec/action@main
+#       - uses: kagozi/loopsec/action@master
 #         with:
 #           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 #           github-token: ${{ secrets.GITHUB_TOKEN }}
