@@ -276,6 +276,36 @@ def github_scan(
         shutil.rmtree(clone_dir, ignore_errors=True)
 
 
+@app.command()
+def api(
+    port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+    reload: bool = typer.Option(False, "--reload", help="Enable auto-reload (dev mode)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Start the LoopSec REST API server."""
+    setup_logging("DEBUG" if verbose else "INFO")
+
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]Error: uvicorn is required. Install with: pip install 'loopsec[api]'[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold cyan]LoopSec API Server[/bold cyan]")
+    console.print(f"  Listening on: http://{host}:{port}")
+    console.print(f"  Docs:         http://{host}:{port}/docs")
+    console.print(f"  Health:       http://{host}:{port}/health\n")
+
+    uvicorn.run(
+        "loopsec.api.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="debug" if verbose else "info",
+    )
+
+
 def main() -> None:
     app()
 

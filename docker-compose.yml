@@ -51,9 +51,9 @@ services:
     build:
       context: ./test-targets/vuln-app
     ports:
-      - "5001:5001"
+      - "5003:5003"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5001/"]
+      test: ["CMD", "curl", "-sf", "http://localhost:5003/"]
       interval: 10s
       timeout: 5s
       retries: 3
