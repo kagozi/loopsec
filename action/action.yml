@@ -112,34 +112,30 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         LOOPSEC_LLM_MODEL: ${{ inputs.model }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        GITHUB_WORKSPACE: ${{ github.workspace }}
-        APP_URL: ${{ inputs.app-url }}
-        SCAN_MODE: ${{ inputs.scan-mode }}
-        EXTRA_ARGS: ${{ inputs.extra-args }}
       run: |
         # Build command
-        CMD="loopsec scan --repo "$GITHUB_WORKSPACE""
+        CMD="loopsec scan --repo ${{ github.workspace }}"
 
         # Add app URL if provided
-        if [ -n "$APP_URL" ]; then
-          CMD="$CMD --url "$APP_URL""
+        if [ -n "${{ inputs.app-url }}" ]; then
+          CMD="$CMD --url ${{ inputs.app-url }}"
         fi
 
         # Add model
-        if [ -n "$LOOPSEC_LLM_MODEL" ]; then
-          CMD="$CMD --model "$LOOPSEC_LLM_MODEL""
+        if [ -n "${{ inputs.model }}" ]; then
+          CMD="$CMD --model ${{ inputs.model }}"
         fi
 
         # Configure scan mode
-        if [ "$SCAN_MODE" = "sast" ]; then
+        if [ "${{ inputs.scan-mode }}" = "sast" ]; then
           CMD="$CMD --skip attacker verifier --no-deploy"
-        elif [ "$SCAN_MODE" = "report" ]; then
+        elif [ "${{ inputs.scan-mode }}" = "report" ]; then
           CMD="$CMD --skip fixer verifier --no-deploy"
         fi
 
         # Extra args
-        if [ -n "$EXTRA_ARGS" ]; then
-          CMD="$CMD $EXTRA_ARGS"
+        if [ -n "${{ inputs.extra-args }}" ]; then
+          CMD="$CMD ${{ inputs.extra-args }}"
         fi
 
         # Run scan (don't fail yet — we handle exit code ourselves)
@@ -188,12 +184,16 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_BRANCH: ${{ github.head_ref || github.ref_name }}
+        INPUTS_MODEL: ${{ inputs.model }}
       run: |
-        PR_URL=$(loopsec github-scan ${{ github.repository }} \
+        # Use environment variables to prevent shell injection
+        PR_URL=$(loopsec github-scan "$GITHUB_REPOSITORY" \
           --create-pr \
-          --branch ${{ github.head_ref || github.ref_name }} \
-          --github-token $GITHUB_TOKEN \
-          --model ${{ inputs.model }} 2>&1 | grep -o 'https://github.com/[^ ]*pull/[0-9]*' || echo "")
+          --branch "$GITHUB_BRANCH" \
+          --github-token "$GITHUB_TOKEN" \
+          --model "$INPUTS_MODEL" 2>&1 | grep -o 'https://github.com/[^ ]*pull/[0-9]*' || echo "")
 
         echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
         if [ -n "$PR_URL" ]; then
