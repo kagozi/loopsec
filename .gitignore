@@ -15,3 +15,5 @@ venv/
 loopsec-report-*
 .gitleaks-report.json
 node_modules/
+*.db
+.DS_Store

@@ -1,0 +1,30 @@
+name: "LoopSec — PR Security Scan"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run LoopSec
+        uses: kagozi/loopsec/action@main   # ← change to your repo
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: "gpt-4o-mini"
+          scan-mode: "sast"          # SAST only for PRs (fast)
+          create-pr: "false"         # Don't create fix PR from a PR
+          fail-on-high: "true"       # Block merge if critical/high found

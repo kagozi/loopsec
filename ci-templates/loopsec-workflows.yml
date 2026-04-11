@@ -1,0 +1,156 @@
+# ──────────────────────────────────────────────────────────
+# LoopSec CI/CD Integration Templates
+# ──────────────────────────────────────────────────────────
+#
+# Copy one or both of these workflows into your repo's
+# .github/workflows/ directory.
+#
+# Prerequisites:
+#   1. Add OPENAI_API_KEY to your repo secrets:
+#      Settings → Secrets → Actions → New repository secret
+#
+#   2. GITHUB_TOKEN is provided automatically by GitHub Actions
+#
+# ──────────────────────────────────────────────────────────
+
+
+# ══════════════════════════════════════════════════════════
+# TEMPLATE 1: PR Security Gate
+# ══════════════════════════════════════════════════════════
+# Scans every PR for vulnerabilities.
+# Posts findings as a PR comment.
+# Blocks merge if critical/high issues found.
+# Fast (~1-3 min) — SAST only, no Docker needed.
+# ──────────────────────────────────────────────────────────
+
+# File: .github/workflows/loopsec-pr.yml
+
+name: "Security Scan (PR)"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  loopsec:
+    name: LoopSec Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: kagozi/loopsec/action@main
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          model: "gpt-4o-mini"        # Fast + cheap for PR checks
+          scan-mode: "sast"           # Static analysis only
+          create-pr: "false"
+          fail-on-high: "true"        # ← Block merge on critical/high
+
+
+# ══════════════════════════════════════════════════════════
+# TEMPLATE 2: Nightly Full Scan + Auto-Fix
+# ══════════════════════════════════════════════════════════
+# Runs the full pipeline: SAST + DAST + Fix + Verify.
+# Auto-deploys your app via Docker sandbox.
+# Creates a fix PR with verified patches.
+# Runs nightly or on push to main.
+# Slower (~5-15 min) — needs Docker.
+# ──────────────────────────────────────────────────────────
+
+# File: .github/workflows/loopsec-full.yml
+
+# name: "Security Scan (Full)"
+#
+# on:
+#   push:
+#     branches: [main]
+#   schedule:
+#     - cron: "0 6 * * 1"            # Weekly Monday 6am UTC
+#   workflow_dispatch:
+#
+# permissions:
+#   contents: write
+#   pull-requests: write
+#   statuses: write
+#
+# jobs:
+#   loopsec:
+#     name: LoopSec Full Scan
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 60
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: kagozi/loopsec/action@main
+#         with:
+#           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+#           github-token: ${{ secrets.GITHUB_TOKEN }}
+#           model: "gpt-4o"           # Better reasoning for fixes
+#           scan-mode: "full"         # SAST + DAST + Fix + Verify
+#           create-pr: "true"         # ← Auto-create fix PR
+#           fail-on-high: "false"
+
+
+# ══════════════════════════════════════════════════════════
+# TEMPLATE 3: Manual Trigger with Options
+# ══════════════════════════════════════════════════════════
+# On-demand scan with configurable options.
+# Useful for security teams running ad-hoc scans.
+# ──────────────────────────────────────────────────────────
+
+# File: .github/workflows/loopsec-manual.yml
+
+# name: "Security Scan (Manual)"
+#
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       scan-mode:
+#         description: "Scan mode"
+#         required: true
+#         default: "full"
+#         type: choice
+#         options:
+#           - full
+#           - sast
+#           - report
+#       model:
+#         description: "LLM model"
+#         required: true
+#         default: "gpt-4o-mini"
+#         type: choice
+#         options:
+#           - gpt-4o
+#           - gpt-4o-mini
+#           - claude-sonnet-4-20250514
+#       create-pr:
+#         description: "Create fix PR"
+#         required: true
+#         default: true
+#         type: boolean
+#
+# permissions:
+#   contents: write
+#   pull-requests: write
+#   statuses: write
+#
+# jobs:
+#   loopsec:
+#     name: LoopSec Scan
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 60
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: kagozi/loopsec/action@main
+#         with:
+#           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+#           github-token: ${{ secrets.GITHUB_TOKEN }}
+#           model: ${{ inputs.model }}
+#           scan-mode: ${{ inputs.scan-mode }}
+#           create-pr: ${{ inputs.create-pr }}
+#           fail-on-high: "true"

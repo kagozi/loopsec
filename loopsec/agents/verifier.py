@@ -3,7 +3,7 @@ Verifier Agent
 
 Closes the loop by verifying that patches actually fix vulnerabilities:
 1. Applies patches to source code
-2. Re-builds/re-deploys the application
+2. Re-builds/re-deploys the application (not implemented yet)
 3. Re-runs the exact same attacks
 4. Reports which fixes worked, which didn't, and any regressions
 """
