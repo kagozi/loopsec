@@ -84,9 +84,9 @@ def search_users():
     search = request.args.get("q", "")
 
     db = get_db()
-    # BAD: SQL injection via search parameter
-    query = "SELECT id, username, email FROM users WHERE username LIKE '%" + search + "%'"
-    cursor = db.execute(query)
+    # FIX: Use parameterized query to prevent SQL injection
+    query = "SELECT id, username, email FROM users WHERE username LIKE ?"
+    cursor = db.execute(query, ('%' + search + '%',))
     users = [{"id": r[0], "username": r[1], "email": r[2]} for r in cursor.fetchall()]
 
     return jsonify(users)
