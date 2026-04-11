@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run LoopSec
-        uses: kagozi/loopsec/action@main   # ← change to your repo
+        uses: kagozi/loopsec/action@master   # ← change to your repo
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
