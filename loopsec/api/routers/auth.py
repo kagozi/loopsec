@@ -124,7 +124,8 @@ async def github_callback(
         token_data = token_resp.json()
         access_token = token_data.get("access_token")
         if not access_token:
-            logger.error("GitHub token exchange failed: %s", token_data)
+            # Avoid logging sensitive information
+            logger.error("GitHub token exchange failed: No access token returned")
             raise HTTPException(status_code=400, detail="GitHub OAuth failed — no access token returned")
 
         # Fetch user profile
@@ -187,3 +188,4 @@ def logout(user: CurrentUser) -> None:
     """
     # TODO: maintain a token denylist (Redis) for immediate invalidation
     pass
+
