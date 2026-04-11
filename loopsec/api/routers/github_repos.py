@@ -37,13 +37,23 @@ def _gh_headers(token: str) -> dict:
 
 async def _gh_get(token: str, path: str, params: dict | None = None) -> dict | list:
     url = f"{_GH_API}{path}"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url, headers=_gh_headers(token), params=params, timeout=_TIMEOUT)
-    if resp.status_code == 404:
-        raise HTTPException(status_code=404, detail="GitHub resource not found")
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=_gh_headers(token), params=params, timeout=_TIMEOUT)
+    except httpx.RequestError as exc:
+        logger.error("GitHub API network error for %s: %s", path, exc)
+        raise HTTPException(status_code=502, detail=f"Could not reach GitHub API: {exc}")
+
+    if resp.status_code == 401:
+        raise HTTPException(status_code=401, detail="GitHub token expired or revoked — please log in again")
     if resp.status_code == 403:
         raise HTTPException(status_code=403, detail="GitHub API rate limit or permission denied")
-    resp.raise_for_status()
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail="GitHub resource not found")
+    if not resp.is_success:
+        logger.error("GitHub API %s returned %d: %s", path, resp.status_code, resp.text[:200])
+        raise HTTPException(status_code=502, detail=f"GitHub API error {resp.status_code}")
+
     return resp.json()
 
 
@@ -56,9 +66,8 @@ async def list_repos(
     user: CurrentUser,
     page: int = Query(1, ge=1),
     per_page: int = Query(30, ge=1, le=100),
-    sort: str = Query("updated", pattern="^(updated|pushed|full_name|created)$"),
-    type: str = Query("all", pattern="^(all|owner|member|public|private)$"),
-    visibility: str = Query("all", pattern="^(all|public|private)$"),
+    sort: str = Query("pushed", pattern="^(updated|pushed|full_name|created)$"),
+    type: str = Query("all", pattern="^(all|owner|public|private|member)$"),
 ) -> dict:
     """
     List repositories the authenticated user has access to.
@@ -72,7 +81,6 @@ async def list_repos(
             "per_page": per_page,
             "sort": sort,
             "type": type,
-            "visibility": visibility,
         },
     )
     repos = [_slim_repo(r) for r in data]  # type: ignore[arg-type]

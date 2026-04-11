@@ -115,10 +115,16 @@ class SandboxManager:
         logger.info(f"Detected app type: {app_type.value}")
 
         # Step 2: Determine port
-        app_port = port or DEFAULT_PORTS.get(app_type, 8080)
+        dockerfile_path = repo / "Dockerfile"
+        if port:
+            app_port = port
+        elif dockerfile_path.exists():
+            # Read EXPOSE from the existing Dockerfile — don't assume a default
+            app_port = self._read_exposed_port(dockerfile_path) or DEFAULT_PORTS.get(app_type, 8080)
+        else:
+            app_port = DEFAULT_PORTS.get(app_type, 8080)
 
         # Step 3: Ensure Dockerfile exists
-        dockerfile_path = repo / "Dockerfile"
         generated_dockerfile = False
         if not dockerfile_path.exists():
             logger.info(f"No Dockerfile found, generating one for {app_type.value}")
@@ -287,6 +293,20 @@ class SandboxManager:
         if "php" in content:
             return AppType.PHP
         return AppType.UNKNOWN
+
+    def _read_exposed_port(self, dockerfile: Path) -> int | None:
+        """Parse the first EXPOSE directive from a Dockerfile and return the port number."""
+        for line in dockerfile.read_text().splitlines():
+            stripped = line.strip().upper()
+            if stripped.startswith("EXPOSE"):
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    try:
+                        # Handle "EXPOSE 5003/tcp" format
+                        return int(parts[1].split("/")[0])
+                    except ValueError:
+                        pass
+        return None
 
     def _detect_python_framework(self, repo: Path) -> AppType:
         """Check Python dependencies to determine framework."""
