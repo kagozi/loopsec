@@ -26,10 +26,31 @@ SEVERITY_MAP = {
     "1": Severity.LOW,
     "2": Severity.MEDIUM,
     "3": Severity.HIGH,
+    # Newer ZAP versions return strings
+    "informational": Severity.INFO,
+    "low": Severity.LOW,
+    "medium": Severity.MEDIUM,
+    "high": Severity.HIGH,
+}
+
+# Newer ZAP versions return confidence as strings
+CONFIDENCE_STR_MAP = {
+    "false positive": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "confirmed": 4,
 }
 
 # Confidence threshold — skip low-confidence results
 MIN_CONFIDENCE = 1  # 0=false positive, 1=low, 2=medium, 3=high
+
+
+def _parse_confidence(value) -> int:
+    s = str(value).strip().lower()
+    if s.isdigit():
+        return int(s)
+    return CONFIDENCE_STR_MAP.get(s, 1)
 
 # Well-known Docker Compose service names → localhost port mappings
 # Used to auto-detect if a URL points to a Docker service
@@ -277,7 +298,7 @@ def _parse_alerts(alerts: list[dict], original_target: str = "") -> list[Finding
     seen = set()  # Dedup by (alert, url, param)
 
     for alert in alerts:
-        confidence = int(alert.get("confidence", "0"))
+        confidence = _parse_confidence(alert.get("confidence", "0"))
         if confidence < MIN_CONFIDENCE:
             continue
 
@@ -286,7 +307,7 @@ def _parse_alerts(alerts: list[dict], original_target: str = "") -> list[Finding
             continue
         seen.add(dedup_key)
 
-        risk = alert.get("risk", "0")
+        risk = str(alert.get("risk", "0")).strip().lower()
 
         # Translate Docker-internal URL back to user-facing URL
         url = alert.get("url", "")
