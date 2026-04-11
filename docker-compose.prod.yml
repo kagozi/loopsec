@@ -49,41 +49,17 @@ services:
 
   # ─── React frontend (nginx) ───────────────────────────
   ui:
-    build:
-      context: ../LoopSec-UI
-      dockerfile: Dockerfile
-      args:
-        # Replace with your EC2 public DNS or Elastic IP after launch
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    image: loopsec-ui:latest
     ports:
       - "80:80"
     depends_on:
       - api
-    restart: unless-stopped
-    networks:
-      - loopsec-net
-
-  # ─── Caddy reverse proxy (HTTPS + routing) ───────────
-  caddy:
-    image: caddy:alpine
-    ports:
-      - "443:443"
-      - "80:80"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - api
-      - ui
     restart: unless-stopped
     networks:
       - loopsec-net
 
 volumes:
   loopsec-data:
-  caddy-data:
-  caddy-config:
 
 networks:
   loopsec-net:

@@ -144,15 +144,24 @@ class ZAPClient:
         resp = self._get("/JSON/spider/action/scan/", {"url": target_url, "maxDuration": str(max_duration)})
         scan_id = resp.get("scan", "0")
 
+        # Give ZAP a moment to register the scan before polling
+        time.sleep(3)
+
+        consecutive_failures = 0
         while True:
             try:
                 status = self._get("/JSON/spider/view/status/", {"scanId": scan_id})
+                consecutive_failures = 0
                 progress = int(status.get("status", "100"))
                 if progress >= 100:
                     break
                 logger.debug(f"Spider progress: {progress}%")
             except Exception as e:
-                logger.warning(f"Spider status check failed: {e}")
+                consecutive_failures += 1
+                logger.warning(f"Spider status check failed ({consecutive_failures}): {e}")
+                if consecutive_failures >= 5:
+                    logger.error("Spider unresponsive, stopping poll")
+                    break
             time.sleep(3)
 
         logger.info("Spider complete")
@@ -202,6 +211,7 @@ class ZAPClient:
         """Clear ZAP session for a fresh start."""
         try:
             self._get("/JSON/core/action/newSession/", {"overwrite": "true"})
+            time.sleep(2)  # Let ZAP finish resetting before we start scanning
         except Exception as e:
             logger.warning(f"Failed to clear ZAP session: {e}")
 
