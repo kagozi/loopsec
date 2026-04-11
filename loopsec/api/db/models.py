@@ -143,3 +143,26 @@ class PatchORM(Base):
     exploit_mitigated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     scan: Mapped[ScanORM] = relationship(back_populates="patches")
+
+
+class PullRequestORM(Base):
+    __tablename__ = "pull_requests"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True)
+    scan_id: Mapped[str] = mapped_column(
+        String(12), ForeignKey("scans.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    user_id: Mapped[str | None] = mapped_column(String(12), ForeignKey("users.id"), nullable=True)
+    github_repo: Mapped[str] = mapped_column(String(255), nullable=False)   # "owner/repo"
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pr_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    branch: Mapped[str] = mapped_column(String(255), nullable=False)        # fix branch
+    base_branch: Mapped[str] = mapped_column(String(255), nullable=False, default="main")
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    patch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open/merged/closed/error
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )

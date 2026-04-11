@@ -15,9 +15,9 @@ import tempfile
 from pathlib import Path
 
 from loopsec.api import events
-from loopsec.api.db.crud import save_pipeline_state, update_scan_status
+from loopsec.api.db.crud import create_pull_request, save_pipeline_state, update_scan_status
 from loopsec.api.db.engine import SessionLocal
-from loopsec.core.models import PipelineState, PipelineStatus
+from loopsec.core.models import PipelineState, PipelineStatus, PatchStatus
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ async def run_pipeline_task(
     auto_deploy: bool,
     github_repo: str | None = None,
     github_token: str | None = None,
+    user_id: str | None = None,
 ) -> None:
     """
     Async background task. Emits SSE events at key milestones.
@@ -88,6 +89,16 @@ async def run_pipeline_task(
     with SessionLocal() as db:
         save_pipeline_state(db, scan_id, state)
 
+    # Auto-create a GitHub PR if we scanned a GitHub repo and have patches
+    if github_repo and github_token and state.patches:
+        actionable = [p for p in state.patches if p.status in (PatchStatus.VERIFIED, PatchStatus.PENDING)]
+        if actionable:
+            await events.publish(scan_id, {"type": "status_change", "status": "creating_pr"})
+            pr_record = await asyncio.to_thread(
+                _create_github_pr, scan_id, user_id, github_repo, github_token, branch, state
+            )
+            await events.publish(scan_id, {"type": "pr_created", "pull_request": pr_record})
+
     # Emit item events as a burst
     for finding in state.findings:
         await events.publish(scan_id, {
@@ -129,6 +140,65 @@ async def run_pipeline_task(
     await events.publish(scan_id, {"type": "status_change", "status": state.status.value})
     await events.publish(scan_id, {"type": "complete", "summary": state.summary()})
     await events.close(scan_id)
+
+
+def _create_github_pr(
+    scan_id: str,
+    user_id: str | None,
+    github_repo: str,
+    github_token: str,
+    base_branch: str,
+    state: PipelineState,
+) -> dict:
+    """
+    Synchronous helper: builds the PR via GitHub API and records it in the DB.
+    Returns the serialised PR dict.
+    """
+    from loopsec.integrations.github_pr import GitHubPRBuilder
+
+    pr_builder = GitHubPRBuilder(repo=github_repo, token=github_token)
+    pr_data: dict | None = None
+    error_msg: str | None = None
+
+    try:
+        pr_data = pr_builder.create_fix_pr(state)
+    except Exception as exc:
+        logger.warning("PR creation failed for scan %s: %s", scan_id, exc)
+        error_msg = str(exc)
+
+    actionable_count = len([
+        p for p in state.patches
+        if p.status in (PatchStatus.VERIFIED, PatchStatus.PENDING)
+    ])
+
+    with SessionLocal() as db:
+        pr_orm = create_pull_request(
+            db,
+            scan_id=scan_id,
+            user_id=user_id,
+            github_repo=github_repo,
+            pr_number=pr_data.get("number") if pr_data else None,
+            pr_url=pr_data.get("html_url") if pr_data else None,
+            branch=pr_data.get("head", {}).get("ref", f"loopsec/fixes-{scan_id}") if pr_data else f"loopsec/fixes-{scan_id}",
+            base_branch=base_branch,
+            title=pr_data.get("title", f"LoopSec: Fix {actionable_count} security vulnerabilities") if pr_data else f"LoopSec: Fix {actionable_count} security vulnerabilities",
+            patch_count=actionable_count,
+            status="error" if error_msg else "open",
+            error=error_msg,
+        )
+        return {
+            "id": pr_orm.id,
+            "scan_id": pr_orm.scan_id,
+            "github_repo": pr_orm.github_repo,
+            "pr_number": pr_orm.pr_number,
+            "pr_url": pr_orm.pr_url,
+            "branch": pr_orm.branch,
+            "base_branch": pr_orm.base_branch,
+            "title": pr_orm.title,
+            "patch_count": pr_orm.patch_count,
+            "status": pr_orm.status,
+            "error": pr_orm.error,
+        }
 
 
 def _clone_github_repo(repo: str, branch: str, token: str) -> str:

@@ -58,3 +58,25 @@ def run_migrations() -> None:
         if "github_repo" not in cols:
             conn.execute(text("ALTER TABLE scans ADD COLUMN github_repo VARCHAR(255)"))
             conn.commit()
+
+        # pull_requests table (added with auto-PR feature)
+        tables = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "pull_requests" not in tables:
+            conn.execute(text("""
+                CREATE TABLE pull_requests (
+                    id VARCHAR(12) PRIMARY KEY,
+                    scan_id VARCHAR(12) NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+                    user_id VARCHAR(12) REFERENCES users(id),
+                    github_repo VARCHAR(255) NOT NULL,
+                    pr_number INTEGER,
+                    pr_url TEXT,
+                    branch VARCHAR(255) NOT NULL,
+                    base_branch VARCHAR(255) NOT NULL DEFAULT 'main',
+                    title TEXT NOT NULL,
+                    patch_count INTEGER NOT NULL DEFAULT 0,
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    error TEXT,
+                    created_at DATETIME NOT NULL
+                )
+            """))
+            conn.commit()

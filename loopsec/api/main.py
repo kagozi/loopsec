@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from loopsec.api.db.crud import cleanup_stale_scans
 from loopsec.api.db.engine import SessionLocal, create_tables, run_migrations
-from loopsec.api.routers import exploits, findings, patches, scans, stream
+from loopsec.api.routers import exploits, findings, patches, pull_requests, scans, stream
 from loopsec.api.routers.auth import router as auth_router
 from loopsec.api.routers.github_repos import router as github_router
 
@@ -59,6 +59,7 @@ app.include_router(stream.router, tags=["stream"])
 app.include_router(findings.router, tags=["findings"])
 app.include_router(patches.router, tags=["patches"])
 app.include_router(exploits.router, tags=["exploits"])
+app.include_router(pull_requests.router, tags=["pull-requests"])
 
 
 @app.get("/health", tags=["meta"])

@@ -96,6 +96,7 @@ async def create_scan(
             auto_deploy=body.auto_deploy,
             github_repo=body.github_repo,
             github_token=user.github_access_token,
+            user_id=user.id,
         )
     else:
         repo = Path(body.repo_path).resolve()  # type: ignore[arg-type]

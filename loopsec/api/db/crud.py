@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from loopsec.api.db.models import ExploitORM, FindingORM, PatchORM, ScanORM, UserORM
+from loopsec.api.db.models import ExploitORM, FindingORM, PatchORM, PullRequestORM, ScanORM, UserORM
 from loopsec.core.models import PipelineState, PipelineStatus
 
 
@@ -423,3 +423,86 @@ def get_patches(
 def get_patch(db: Session, patch_id: str) -> dict | None:
     row = db.get(PatchORM, patch_id)
     return _patch_to_dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Pull Requests
+# ---------------------------------------------------------------------------
+
+def _pr_to_dict(pr: PullRequestORM) -> dict:
+    return {
+        "id": pr.id,
+        "scan_id": pr.scan_id,
+        "github_repo": pr.github_repo,
+        "pr_number": pr.pr_number,
+        "pr_url": pr.pr_url,
+        "branch": pr.branch,
+        "base_branch": pr.base_branch,
+        "title": pr.title,
+        "patch_count": pr.patch_count,
+        "status": pr.status,
+        "error": pr.error,
+        "created_at": pr.created_at.isoformat() if pr.created_at else None,
+    }
+
+
+def create_pull_request(
+    db: Session,
+    *,
+    scan_id: str,
+    user_id: str | None,
+    github_repo: str,
+    pr_number: int | None,
+    pr_url: str | None,
+    branch: str,
+    base_branch: str,
+    title: str,
+    patch_count: int,
+    status: str = "open",
+    error: str | None = None,
+) -> PullRequestORM:
+    pr = PullRequestORM(
+        id=uuid.uuid4().hex[:12],
+        scan_id=scan_id,
+        user_id=user_id,
+        github_repo=github_repo,
+        pr_number=pr_number,
+        pr_url=pr_url,
+        branch=branch,
+        base_branch=base_branch,
+        title=title,
+        patch_count=patch_count,
+        status=status,
+        error=error,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(pr)
+    db.commit()
+    db.refresh(pr)
+    return pr
+
+
+def list_pull_requests(
+    db: Session,
+    user_id: str,
+    scan_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    stmt = (
+        select(PullRequestORM)
+        .join(ScanORM, PullRequestORM.scan_id == ScanORM.id)
+        .where(ScanORM.user_id == user_id)
+    )
+    count_stmt = (
+        select(func.count())
+        .select_from(PullRequestORM)
+        .join(ScanORM, PullRequestORM.scan_id == ScanORM.id)
+        .where(ScanORM.user_id == user_id)
+    )
+    if scan_id:
+        stmt = stmt.where(PullRequestORM.scan_id == scan_id)
+        count_stmt = count_stmt.where(PullRequestORM.scan_id == scan_id)
+    total = db.execute(count_stmt).scalar_one()
+    rows = db.execute(stmt.order_by(PullRequestORM.created_at.desc()).offset(offset).limit(limit)).scalars().all()
+    return [_pr_to_dict(r) for r in rows], total
