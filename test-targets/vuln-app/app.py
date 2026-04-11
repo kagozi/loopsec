@@ -19,9 +19,8 @@ import pickle
 import sqlite3
 import subprocess
 import base64
-import json
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, escape
 
 app = Flask(__name__)
 
@@ -99,14 +98,14 @@ def search_users():
 @app.route("/search")
 def search_page():
     query = request.args.get("q", "")
-    # BAD: Reflecting user input without escaping
+    # FIX: Escape user input to prevent XSS
     html = f"""
     <html>
     <body>
         <h1>Search Results</h1>
-        <p>You searched for: {query}</p>
+        <p>You searched for: {escape(query)}</p>
         <form action="/search" method="get">
-            <input name="q" value="{query}" />
+            <input name="q" value="{escape(query)}" />
             <button type="submit">Search</button>
         </form>
     </body>
@@ -174,10 +173,10 @@ def read_file():
 def import_data():
     data = request.form.get("data", "")
 
-    # FIX: Use JSON instead of pickle for deserialization
+    # BAD: Deserializing untrusted user input with pickle
     try:
         decoded = base64.b64decode(data)
-        obj = json.loads(decoded)
+        obj = pickle.loads(decoded)
         return jsonify({"status": "imported", "type": str(type(obj))})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -226,4 +225,3 @@ def index():
 if __name__ == "__main__":
     os.makedirs("uploads", exist_ok=True)
     app.run(host="0.0.0.0", port=5003, debug=True)
-
