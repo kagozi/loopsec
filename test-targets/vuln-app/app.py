@@ -120,7 +120,8 @@ def get_notes():
 
     db = get_db()
     # FIX: Use parameterized query to prevent SQL injection
-    cursor = db.execute("SELECT * FROM notes WHERE user_id = ?", (user_id,))
+    query = "SELECT * FROM notes WHERE user_id = ?"
+    cursor = db.execute(query, (user_id,))
     notes = [{"id": r[0], "title": r[2], "content": r[3]} for r in cursor.fetchall()]
 
     return jsonify(notes)
@@ -224,4 +225,3 @@ def index():
 if __name__ == "__main__":
     os.makedirs("uploads", exist_ok=True)
     app.run(host="0.0.0.0", port=5003, debug=True)
-
