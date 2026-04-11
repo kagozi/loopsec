@@ -13,12 +13,41 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from loopsec.api.db.engine import Base
 
 
+class UserORM(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True)
+    github_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
+    github_login: Mapped[str] = mapped_column(String(255), nullable=False)
+    github_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    github_avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    github_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Stored plaintext for now — encrypt with a KMS in production
+    github_access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    last_login_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    scans: Mapped[list[ScanORM]] = relationship(
+        back_populates="user", lazy="select"
+    )
+
+
 class ScanORM(Base):
     __tablename__ = "scans"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(
+        String(12), ForeignKey("users.id"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
     repo_path: Mapped[str] = mapped_column(Text, nullable=False)
+    github_repo: Mapped[str | None] = mapped_column(String(255), nullable=True)  # "owner/repo"
     app_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     branch: Mapped[str] = mapped_column(String(255), nullable=False, default="main")
     languages: Mapped[str] = mapped_column(Text, nullable=False, default="[]")       # JSON list[str]
@@ -37,6 +66,7 @@ class ScanORM(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
+    user: Mapped[UserORM | None] = relationship(back_populates="scans")
     findings: Mapped[list[FindingORM]] = relationship(
         back_populates="scan", cascade="all, delete-orphan", lazy="select"
     )

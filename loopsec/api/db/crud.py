@@ -6,13 +6,14 @@ All functions are synchronous (called from threads or directly from async handle
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from loopsec.api.db.models import ExploitORM, FindingORM, PatchORM, ScanORM
+from loopsec.api.db.models import ExploitORM, FindingORM, PatchORM, ScanORM, UserORM
 from loopsec.core.models import PipelineState, PipelineStatus
 
 
@@ -27,8 +28,10 @@ def _j(v: Any) -> str:
 def _scan_to_dict(scan: ScanORM) -> dict:
     return {
         "scan_id": scan.id,
+        "user_id": scan.user_id,
         "status": scan.status,
         "repo_path": scan.repo_path,
+        "github_repo": scan.github_repo,
         "app_url": scan.app_url,
         "branch": scan.branch,
         "languages": json.loads(scan.languages or "[]"),
@@ -99,6 +102,72 @@ def _patch_to_dict(p: PatchORM) -> dict:
     }
 
 
+def _user_to_dict(u: UserORM) -> dict:
+    return {
+        "id": u.id,
+        "github_login": u.github_login,
+        "github_name": u.github_name,
+        "github_avatar_url": u.github_avatar_url,
+        "github_email": u.github_email,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Users
+# ---------------------------------------------------------------------------
+
+def upsert_user(
+    db: Session,
+    github_id: int,
+    github_login: str,
+    github_name: str | None,
+    github_avatar_url: str | None,
+    github_email: str | None,
+    github_access_token: str,
+) -> UserORM:
+    """Create a new user or update their token on re-login."""
+    now = datetime.now(timezone.utc)
+    row = db.execute(
+        select(UserORM).where(UserORM.github_id == github_id)
+    ).scalar_one_or_none()
+
+    if row:
+        row.github_login = github_login
+        row.github_name = github_name
+        row.github_avatar_url = github_avatar_url
+        row.github_email = github_email
+        row.github_access_token = github_access_token
+        row.last_login_at = now
+    else:
+        row = UserORM(
+            id=uuid.uuid4().hex[:12],
+            github_id=github_id,
+            github_login=github_login,
+            github_name=github_name,
+            github_avatar_url=github_avatar_url,
+            github_email=github_email,
+            github_access_token=github_access_token,
+            created_at=now,
+            last_login_at=now,
+        )
+        db.add(row)
+
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_user_by_id(db: Session, user_id: str) -> UserORM | None:
+    return db.get(UserORM, user_id)
+
+
+def get_user_dict(db: Session, user_id: str) -> dict | None:
+    row = get_user_by_id(db, user_id)
+    return _user_to_dict(row) if row else None
+
+
 # ---------------------------------------------------------------------------
 # Scans
 # ---------------------------------------------------------------------------
@@ -109,12 +178,16 @@ def create_scan(
     repo_path: str,
     app_url: str | None,
     branch: str,
+    user_id: str | None = None,
+    github_repo: str | None = None,
 ) -> ScanORM:
     now = datetime.now(timezone.utc)
     row = ScanORM(
         id=scan_id,
+        user_id=user_id,
         status=PipelineStatus.QUEUED.value,
         repo_path=repo_path,
+        github_repo=github_repo,
         app_url=app_url,
         branch=branch,
         started_at=now,
@@ -137,12 +210,16 @@ def get_scan_dict(db: Session, scan_id: str) -> dict | None:
 
 def list_scans(
     db: Session,
+    user_id: str | None = None,
     limit: int = 20,
     offset: int = 0,
     status: str | None = None,
 ) -> tuple[list[dict], int]:
     stmt = select(ScanORM).order_by(ScanORM.created_at.desc())
     count_stmt = select(func.count()).select_from(ScanORM)
+    if user_id:
+        stmt = stmt.where(ScanORM.user_id == user_id)
+        count_stmt = count_stmt.where(ScanORM.user_id == user_id)
     if status:
         stmt = stmt.where(ScanORM.status == status)
         count_stmt = count_stmt.where(ScanORM.status == status)

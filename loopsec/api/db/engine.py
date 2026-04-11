@@ -5,7 +5,7 @@ SQLite with WAL mode for safe concurrent access from background threads.
 
 from __future__ import annotations
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from loopsec.core.config import get_config
@@ -42,3 +42,19 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 def create_tables() -> None:
     """Idempotent — safe to call on every startup."""
     Base.metadata.create_all(engine)
+
+
+def run_migrations() -> None:
+    """
+    Add columns introduced after the initial schema, idempotently.
+    Called on startup after create_tables().
+    """
+    with engine.connect() as conn:
+        # scans: user_id (added with auth)
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(scans)"))}
+        if "user_id" not in cols:
+            conn.execute(text("ALTER TABLE scans ADD COLUMN user_id VARCHAR(12)"))
+            conn.commit()
+        if "github_repo" not in cols:
+            conn.execute(text("ALTER TABLE scans ADD COLUMN github_repo VARCHAR(255)"))
+            conn.commit()

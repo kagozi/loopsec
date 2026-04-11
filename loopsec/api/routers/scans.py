@@ -1,8 +1,8 @@
 """
-Scan lifecycle endpoints.
+Scan lifecycle endpoints. All endpoints require authentication.
 
-POST /scans          — trigger a new scan (returns immediately with scan_id)
-GET  /scans          — list all scans with pagination
+POST /scans          — trigger a new scan (local path or GitHub repo)
+GET  /scans          — list the current user's scans
 GET  /scans/{id}     — get full scan details
 DELETE /scans/{id}   — delete a scan and all its data
 GET  /scans/{id}/report — download markdown report
@@ -16,10 +16,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy.orm import Session
 
 from loopsec.api import background
+from loopsec.api.auth.dependencies import CurrentUser
 from loopsec.api.db import crud
 from loopsec.api.dependencies import get_db
 from loopsec.core.models import PipelineStatus
@@ -34,11 +35,21 @@ DB = Annotated[Session, Depends(get_db)]
 # ---------------------------------------------------------------------------
 
 class ScanRequest(BaseModel):
-    repo_path: str
+    # Provide exactly one of repo_path (local) or github_repo ("owner/repo")
+    repo_path: str | None = None
+    github_repo: str | None = None
     app_url: str | None = None
     branch: str = "main"
     skip_agents: list[str] = []
     auto_deploy: bool = True
+
+    @model_validator(mode="after")
+    def check_source(self) -> "ScanRequest":
+        if not self.repo_path and not self.github_repo:
+            raise ValueError("Provide either repo_path (local) or github_repo (owner/repo)")
+        if self.repo_path and self.github_repo:
+            raise ValueError("Provide only one of repo_path or github_repo, not both")
+        return self
 
 
 class ScanCreatedResponse(BaseModel):
@@ -55,26 +66,54 @@ class ScanCreatedResponse(BaseModel):
 async def create_scan(
     body: ScanRequest,
     background_tasks: BackgroundTasks,
+    user: CurrentUser,
     db: DB,
 ) -> ScanCreatedResponse:
-    """Trigger a new scan. Returns immediately; use the stream_url for live progress."""
-    # Validate repo path
-    repo = Path(body.repo_path).resolve()
-    if not repo.exists():
-        raise HTTPException(status_code=400, detail=f"repo_path not found: {repo}")
+    """
+    Trigger a new scan. Returns immediately with a scan_id.
+    Subscribe to stream_url for live progress via SSE.
 
+    Supply either:
+      - repo_path: absolute local path to source code, OR
+      - github_repo: "owner/repo" string (will be cloned using your GitHub token)
+    """
     scan_id = uuid.uuid4().hex[:12]
-    crud.create_scan(db, scan_id, str(repo), body.app_url, body.branch)
 
-    background_tasks.add_task(
-        background.run_pipeline_task,
-        scan_id=scan_id,
-        repo_path=str(repo),
-        app_url=body.app_url,
-        branch=body.branch,
-        skip_agents=body.skip_agents,
-        auto_deploy=body.auto_deploy,
-    )
+    if body.github_repo:
+        # Placeholder path — background task will clone to a temp dir
+        repo_path = f"github:{body.github_repo}"
+        crud.create_scan(
+            db, scan_id, repo_path, body.app_url, body.branch,
+            user_id=user.id, github_repo=body.github_repo,
+        )
+        background_tasks.add_task(
+            background.run_pipeline_task,
+            scan_id=scan_id,
+            repo_path=None,
+            app_url=body.app_url,
+            branch=body.branch,
+            skip_agents=body.skip_agents,
+            auto_deploy=body.auto_deploy,
+            github_repo=body.github_repo,
+            github_token=user.github_access_token,
+        )
+    else:
+        repo = Path(body.repo_path).resolve()  # type: ignore[arg-type]
+        if not repo.exists():
+            raise HTTPException(status_code=400, detail=f"repo_path not found: {repo}")
+        crud.create_scan(
+            db, scan_id, str(repo), body.app_url, body.branch,
+            user_id=user.id,
+        )
+        background_tasks.add_task(
+            background.run_pipeline_task,
+            scan_id=scan_id,
+            repo_path=str(repo),
+            app_url=body.app_url,
+            branch=body.branch,
+            skip_agents=body.skip_agents,
+            auto_deploy=body.auto_deploy,
+        )
 
     return ScanCreatedResponse(
         scan_id=scan_id,
@@ -85,30 +124,33 @@ async def create_scan(
 
 @router.get("")
 def list_scans(
+    user: CurrentUser,
     db: DB,
     limit: int = 20,
     offset: int = 0,
     status: str | None = None,
 ) -> dict:
-    """List all scans, newest first. Optionally filter by status."""
-    items, total = crud.list_scans(db, limit=limit, offset=offset, status=status)
+    """List the current user's scans, newest first."""
+    items, total = crud.list_scans(db, user_id=user.id, limit=limit, offset=offset, status=status)
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/{scan_id}")
-def get_scan(scan_id: str, db: DB) -> dict:
-    """Get full details for a single scan."""
+def get_scan(scan_id: str, user: CurrentUser, db: DB) -> dict:
+    """Get full details for a single scan (must belong to the current user)."""
     data = crud.get_scan_dict(db, scan_id)
     if not data:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if data.get("user_id") != user.id:
         raise HTTPException(status_code=404, detail="Scan not found")
     return data
 
 
 @router.delete("/{scan_id}", status_code=204)
-def delete_scan(scan_id: str, db: DB) -> None:
+def delete_scan(scan_id: str, user: CurrentUser, db: DB) -> None:
     """Delete a scan and all its findings, exploits, and patches."""
     row = crud.get_scan(db, scan_id)
-    if not row:
+    if not row or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Scan not found")
 
     in_progress = {
@@ -127,15 +169,14 @@ def delete_scan(scan_id: str, db: DB) -> None:
 
 
 @router.get("/{scan_id}/report", response_class=PlainTextResponse)
-def download_report(scan_id: str, db: DB) -> str:
+def download_report(scan_id: str, user: CurrentUser, db: DB) -> str:
     """Download the markdown report for a completed scan."""
     row = crud.get_scan(db, scan_id)
-    if not row:
+    if not row or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Scan not found")
     if row.status not in (PipelineStatus.COMPLETE.value, PipelineStatus.ERRORED.value):
         raise HTTPException(status_code=409, detail="Scan has not completed yet")
 
-    # Reconstruct PipelineState from DB and generate report
     import json
     from loopsec.core.models import (
         Exploit, Finding, FindingSource, MappedVulnerability,
@@ -146,16 +187,9 @@ def download_report(scan_id: str, db: DB) -> str:
     from loopsec.api.db.models import FindingORM, ExploitORM, PatchORM
     from sqlalchemy import select
 
-    with db:
-        findings_orm = db.execute(
-            select(FindingORM).where(FindingORM.scan_id == scan_id)
-        ).scalars().all()
-        exploits_orm = db.execute(
-            select(ExploitORM).where(ExploitORM.scan_id == scan_id)
-        ).scalars().all()
-        patches_orm = db.execute(
-            select(PatchORM).where(PatchORM.scan_id == scan_id)
-        ).scalars().all()
+    findings_orm = db.execute(select(FindingORM).where(FindingORM.scan_id == scan_id)).scalars().all()
+    exploits_orm = db.execute(select(ExploitORM).where(ExploitORM.scan_id == scan_id)).scalars().all()
+    patches_orm = db.execute(select(PatchORM).where(PatchORM.scan_id == scan_id)).scalars().all()
 
     findings = [
         Finding(
