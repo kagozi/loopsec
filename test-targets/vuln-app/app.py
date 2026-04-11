@@ -20,7 +20,7 @@ import sqlite3
 import subprocess
 import base64
 
-from flask import Flask, request, jsonify, render_template_string, escape
+from flask import Flask, request, jsonify, render_template_string
 
 app = Flask(__name__)
 
@@ -98,14 +98,14 @@ def search_users():
 @app.route("/search")
 def search_page():
     query = request.args.get("q", "")
-    # FIX: Escape user input to prevent XSS
+    # BAD: Reflecting user input without escaping
     html = f"""
     <html>
     <body>
         <h1>Search Results</h1>
-        <p>You searched for: {escape(query)}</p>
+        <p>You searched for: {query}</p>
         <form action="/search" method="get">
-            <input name="q" value="{escape(query)}" />
+            <input name="q" value="{query}" />
             <button type="submit">Search</button>
         </form>
     </body>
@@ -119,9 +119,8 @@ def get_notes():
     user_id = request.args.get("user_id", "1")
 
     db = get_db()
-    # BAD: No authorization check — any user can read any user's notes (IDOR)
-    query = f"SELECT * FROM notes WHERE user_id = {user_id}"
-    cursor = db.execute(query)
+    # FIX: Use parameterized query to prevent SQL injection
+    cursor = db.execute("SELECT * FROM notes WHERE user_id = ?", (user_id,))
     notes = [{"id": r[0], "title": r[2], "content": r[3]} for r in cursor.fetchall()]
 
     return jsonify(notes)
@@ -225,3 +224,4 @@ def index():
 if __name__ == "__main__":
     os.makedirs("uploads", exist_ok=True)
     app.run(host="0.0.0.0", port=5003, debug=True)
+
