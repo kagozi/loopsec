@@ -65,6 +65,12 @@ async def run_pipeline_task(
         else:
             actual_repo_path = repo_path  # type: ignore[assignment]
 
+        # Build a thread-safe callback that publishes events to the async event bus
+        loop = asyncio.get_running_loop()
+
+        def _progress_callback(payload: dict) -> None:
+            asyncio.run_coroutine_threadsafe(events.publish(scan_id, payload), loop)
+
         state: PipelineState = await asyncio.to_thread(
             _run_sync,
             actual_repo_path,
@@ -72,6 +78,7 @@ async def run_pipeline_task(
             branch,
             skip_agents,
             auto_deploy,
+            _progress_callback,
         )
 
     except Exception as exc:
@@ -99,44 +106,7 @@ async def run_pipeline_task(
             )
             await events.publish(scan_id, {"type": "pr_created", "pull_request": pr_record})
 
-    # Emit item events as a burst
-    for finding in state.findings:
-        await events.publish(scan_id, {
-            "type": "finding_added",
-            "finding": {
-                "id": finding.id,
-                "severity": finding.severity.value,
-                "source": finding.source.value,
-                "title": finding.title,
-                "file_path": finding.file_path,
-                "line_start": finding.line_start,
-                "endpoint": finding.endpoint,
-                "tool": finding.tool,
-            },
-        })
-
-    for exploit in state.exploits:
-        await events.publish(scan_id, {
-            "type": "exploit_added",
-            "exploit": {
-                "id": exploit.id,
-                "finding_id": exploit.finding_id,
-                "description": exploit.description,
-                "verified": exploit.verified,
-            },
-        })
-
-    for patch in state.patches:
-        await events.publish(scan_id, {
-            "type": "patch_added",
-            "patch": {
-                "id": patch.id,
-                "finding_id": patch.finding_id,
-                "file_path": patch.file_path,
-                "status": patch.status.value,
-            },
-        })
-
+    # findings/exploits/patches were already streamed in real-time via progress_callback
     await events.publish(scan_id, {"type": "status_change", "status": state.status.value})
     await events.publish(scan_id, {"type": "complete", "summary": state.summary()})
     await events.close(scan_id)
@@ -154,14 +124,17 @@ def _create_github_pr(
     Synchronous helper: builds the PR via GitHub API and records it in the DB.
     Returns the serialised PR dict.
     """
+    from loopsec.integrations.github import GitHubClient
     from loopsec.integrations.github_pr import GitHubPRBuilder
 
-    pr_builder = GitHubPRBuilder(repo=github_repo, token=github_token)
+    owner, repo_name = github_repo.split("/", 1)
+    client = GitHubClient(token=github_token)
+    pr_builder = GitHubPRBuilder(client=client, owner=owner, repo=repo_name)
     pr_data: dict | None = None
     error_msg: str | None = None
 
     try:
-        pr_data = pr_builder.create_fix_pr(state)
+        pr_data = pr_builder.create_fix_pr(state, base_branch=base_branch)
     except Exception as exc:
         logger.warning("PR creation failed for scan %s: %s", scan_id, exc)
         error_msg = str(exc)
@@ -231,11 +204,12 @@ def _run_sync(
     branch: str,
     skip_agents: list[str],
     auto_deploy: bool,
+    progress_callback=None,
 ) -> PipelineState:
     """Synchronous wrapper — runs in a thread pool via asyncio.to_thread()."""
     from loopsec.core.orchestrator import Orchestrator
 
-    orch = Orchestrator()
+    orch = Orchestrator(progress_callback=progress_callback)
     return orch.run(
         repo_path=repo_path,
         app_url=app_url,

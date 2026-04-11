@@ -56,9 +56,31 @@ class AttackerAgent(BaseAgent):
         # 5. Generate proof-of-concept exploits
         for finding in dast_findings:
             state.add_finding(finding)
+            self._emit({
+                "type": "finding_added",
+                "finding": {
+                    "id": finding.id,
+                    "severity": finding.severity.value,
+                    "source": finding.source.value,
+                    "title": finding.title,
+                    "file_path": finding.file_path,
+                    "line_start": finding.line_start,
+                    "endpoint": finding.endpoint,
+                    "tool": finding.tool,
+                },
+            })
             exploit = self._generate_exploit(finding)
             if exploit:
                 state.add_exploit(exploit)
+                self._emit({
+                    "type": "exploit_added",
+                    "exploit": {
+                        "id": exploit.id,
+                        "finding_id": exploit.finding_id,
+                        "description": exploit.description,
+                        "verified": exploit.verified,
+                    },
+                })
 
         console.print(
             f"  [bold]Total DAST findings: {len(dast_findings)}, "

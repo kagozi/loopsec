@@ -45,7 +45,7 @@ class Config(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
     # General
-    work_dir: Path = Field(default_factory=lambda: Path.home() / ".loopsec")
+    work_dir: Path = Field(default_factory=lambda: Path(os.getenv("LOOPSEC_WORK_DIR", str(Path.home() / ".loopsec"))))
     log_level: str = "INFO"
     max_findings_to_fix: int = 20       # Don't try to fix everything at once
     auto_apply_patches: bool = False    # Safety: require confirmation by default

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
+from typing import Callable
 
 from rich.console import Console
 
@@ -25,9 +26,18 @@ class BaseAgent(ABC):
     name: str = "base"
     description: str = ""
 
-    def __init__(self, llm: LLMClient | None = None):
+    def __init__(self, llm: LLMClient | None = None, emit: Callable[[dict], None] | None = None):
         self.llm = llm or get_llm()
         self.logger = logging.getLogger(f"loopsec.agents.{self.name}")
+        self.emit = emit  # thread-safe callback: emit({"type": ..., ...})
+
+    def _emit(self, payload: dict) -> None:
+        """Emit a progress event if a callback is registered."""
+        if self.emit:
+            try:
+                self.emit(payload)
+            except Exception:
+                pass  # never let emit errors crash the pipeline
 
     @abstractmethod
     def run(self, state: PipelineState) -> PipelineState:
@@ -38,6 +48,7 @@ class BaseAgent(ABC):
         """Wrapper that handles logging, timing, and error handling."""
         console.print(f"\n[bold cyan]▶ Running {self.name} agent...[/bold cyan]")
         self.logger.info(f"Agent '{self.name}' starting")
+        self._emit({"type": "agent_start", "agent": self.name})
         start = time.time()
 
         try:
@@ -48,6 +59,7 @@ class BaseAgent(ABC):
                 f"({elapsed:.1f}s)"
             )
             self.logger.info(f"Agent '{self.name}' completed in {elapsed:.1f}s")
+            self._emit({"type": "agent_done", "agent": self.name, "elapsed": round(elapsed, 1)})
         except Exception as e:
             elapsed = time.time() - start
             error_msg = f"Agent '{self.name}' failed after {elapsed:.1f}s: {e}"

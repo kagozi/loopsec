@@ -1,0 +1,27 @@
+# Replace yourdomain.com with your actual domain, or remove the domain line
+# to use the EC2 public IP (HTTP only — Caddy can't get a cert for a raw IP).
+
+{$PUBLIC_HOST:localhost} {
+
+    # API — websocket + REST
+    handle /auth/* {
+        reverse_proxy api:8000
+    }
+    handle /scans* {
+        reverse_proxy api:8000
+    }
+    handle /github/* {
+        reverse_proxy api:8000
+    }
+    handle /pull-requests* {
+        reverse_proxy api:8000
+    }
+    handle /health {
+        reverse_proxy api:8000
+    }
+
+    # Everything else → React UI
+    handle {
+        reverse_proxy ui:80
+    }
+}

@@ -14,6 +14,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from rich.console import Console
 from rich.panel import Panel
@@ -41,14 +42,15 @@ class Orchestrator:
         state = orch.run(repo_path="/path/to/code", app_url="http://localhost:8080")
     """
 
-    def __init__(self, llm: LLMClient | None = None):
+    def __init__(self, llm: LLMClient | None = None, progress_callback: Callable[[dict], None] | None = None):
         self.llm = llm or LLMClient()
+        self._progress_callback = progress_callback
         self.agents = [
-            AnalyzerAgent(llm=self.llm),
-            AttackerAgent(llm=self.llm),
-            MapperAgent(llm=self.llm),
-            FixerAgent(llm=self.llm),
-            VerifierAgent(llm=self.llm),
+            AnalyzerAgent(llm=self.llm, emit=progress_callback),
+            AttackerAgent(llm=self.llm, emit=progress_callback),
+            MapperAgent(llm=self.llm, emit=progress_callback),
+            FixerAgent(llm=self.llm, emit=progress_callback),
+            VerifierAgent(llm=self.llm, emit=progress_callback),
         ]
         self._sandbox = None
         self._sandbox_info = None

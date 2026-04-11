@@ -84,6 +84,17 @@ class FixerAgent(BaseAgent):
                     console.print(f"  [yellow]⚠ Patch for {file_path}:{line_start} — SAST re-check found issues[/yellow]")
 
                 state.add_patch(patch)
+                self._emit({
+                    "type": "patch_added",
+                    "patch": {
+                        "id": patch.id,
+                        "finding_id": patch.finding_id,
+                        "file_path": patch.file_path,
+                        "status": patch.status.value,
+                        "passes_sast": patch.passes_sast,
+                        "explanation": patch.explanation,
+                    },
+                })
 
         console.print(f"  [bold]Generated {len(state.patches)} patches[/bold]")
         return state

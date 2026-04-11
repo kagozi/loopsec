@@ -74,7 +74,7 @@ async def create_pr_for_scan(scan_id: str, user: CurrentUser, db: DB) -> dict:
         raise HTTPException(status_code=400, detail="No patches to create a PR for")
 
     # Run PR creation in background thread
-    from loopsec.api.background import _create_github_pr
+    from loopsec.api.background import _create_github_pr  # noqa: PLC0415
     from loopsec.core.models import (
         Finding, FindingSource, Patch, PatchStatus, PipelineState,
         PipelineStatus as PS, ScanTarget, Severity,

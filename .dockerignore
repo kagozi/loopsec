@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.git
+.env
+.venv
+venv
+*.db
+*.sqlite
+loopsec-report-*
+uploads/
+tests/
+.mypy_cache
+.ruff_cache

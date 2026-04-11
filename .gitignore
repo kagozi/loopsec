@@ -6,6 +6,7 @@ build/
 .eggs/
 *.egg
 .env
+.env.prod
 .venv/
 venv/
 .mypy_cache/

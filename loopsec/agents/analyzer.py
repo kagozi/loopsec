@@ -50,9 +50,22 @@ class AnalyzerAgent(BaseAgent):
         if all_findings:
             all_findings = self._prioritize(all_findings, state)
 
-        # 6. Add to state
+        # 6. Add to state and emit each finding in real-time
         for f in all_findings:
             state.add_finding(f)
+            self._emit({
+                "type": "finding_added",
+                "finding": {
+                    "id": f.id,
+                    "severity": f.severity.value,
+                    "source": f.source.value,
+                    "title": f.title,
+                    "file_path": f.file_path,
+                    "line_start": f.line_start,
+                    "endpoint": f.endpoint,
+                    "tool": f.tool,
+                },
+            })
 
         # Print summary table
         self._print_summary(all_findings)
