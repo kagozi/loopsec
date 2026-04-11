@@ -15,8 +15,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from loopsec.api.db.crud import cleanup_stale_scans
-from loopsec.api.db.engine import SessionLocal, create_tables
+from loopsec.api.db.engine import SessionLocal, create_tables, run_migrations
 from loopsec.api.routers import exploits, findings, patches, scans, stream
+from loopsec.api.routers.auth import router as auth_router
+from loopsec.api.routers.github_repos import router as github_router
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     create_tables()
+    run_migrations()
     with SessionLocal() as db:
         stale = cleanup_stale_scans(db)
         if stale:
@@ -42,13 +45,15 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten this before production
+    allow_origins=["*"],   # tighten to your frontend domain before production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # --- Routers ---
+app.include_router(auth_router)                               # /auth/*
+app.include_router(github_router)                             # /github/*
 app.include_router(scans.router, prefix="/scans", tags=["scans"])
 app.include_router(stream.router, tags=["stream"])
 app.include_router(findings.router, tags=["findings"])

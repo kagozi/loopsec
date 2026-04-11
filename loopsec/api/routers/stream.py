@@ -1,5 +1,5 @@
 """
-SSE streaming endpoint.
+SSE streaming endpoint. Requires authentication.
 
 GET /scans/{scan_id}/stream
 
@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from loopsec.api import events
+from loopsec.api.auth.dependencies import CurrentUser
 from loopsec.api.db import crud
 from loopsec.api.dependencies import get_db
 from loopsec.core.models import PipelineStatus
@@ -31,7 +32,7 @@ router = APIRouter()
 DB = Annotated[Session, Depends(get_db)]
 
 _TERMINAL_STATUSES = {PipelineStatus.COMPLETE.value, PipelineStatus.ERRORED.value}
-_KEEP_ALIVE_INTERVAL = 15.0  # seconds
+_KEEP_ALIVE_INTERVAL = 15.0
 
 
 def _sse(event_type: str, data: dict) -> str:
@@ -39,13 +40,13 @@ def _sse(event_type: str, data: dict) -> str:
 
 
 @router.get("/scans/{scan_id}/stream")
-async def stream_scan(scan_id: str, db: DB) -> StreamingResponse:
+async def stream_scan(scan_id: str, user: CurrentUser, db: DB) -> StreamingResponse:
     """
     Server-Sent Events stream for a scan.
-    Connect with: EventSource('/scans/{scan_id}/stream')
+    Connect with: EventSource('/scans/{scan_id}/stream', {headers: {Authorization: 'Bearer <token>'}})
     """
     row = crud.get_scan(db, scan_id)
-    if not row:
+    if not row or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Scan not found")
 
     already_done = row.status in _TERMINAL_STATUSES
@@ -55,7 +56,7 @@ async def stream_scan(scan_id: str, db: DB) -> StreamingResponse:
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",       # Disable nginx buffering
+            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
     )
@@ -66,19 +67,11 @@ async def _generate(
     already_done: bool,
     db: Session,
 ) -> AsyncGenerator[str, None]:
-    """
-    Core SSE generator.
-
-    If the scan is already done we replay everything from DB then close.
-    If it's in progress we read from the live event queue until the sentinel arrives.
-    """
     if already_done:
         async for chunk in _replay_from_db(scan_id, db):
             yield chunk
         return
 
-    # Subscribe before reading — ensures we don't miss events published
-    # between the status check above and this point.
     q = events.subscribe(scan_id)
     try:
         async for chunk in _stream_live(scan_id, q):
@@ -88,7 +81,6 @@ async def _generate(
 
 
 async def _replay_from_db(scan_id: str, db: Session) -> AsyncGenerator[str, None]:
-    """Replay a completed scan's data from the DB."""
     row = crud.get_scan(db, scan_id)
     if row:
         yield _sse("progress", {"type": "status_change", "status": row.status})
@@ -106,10 +98,9 @@ async def _replay_from_db(scan_id: str, db: Session) -> AsyncGenerator[str, None
         yield _sse("progress", {"type": "patch_added", "patch": p})
 
     if row and row.summary_json:
-        import json as _json
         yield _sse("progress", {
             "type": "complete",
-            "summary": _json.loads(row.summary_json),
+            "summary": json.loads(row.summary_json),
         })
 
 
@@ -117,20 +108,17 @@ async def _stream_live(
     scan_id: str,
     q: asyncio.Queue,
 ) -> AsyncGenerator[str, None]:
-    """Read live events from the queue until the sentinel or timeout."""
     while True:
         try:
             item = await asyncio.wait_for(q.get(), timeout=_KEEP_ALIVE_INTERVAL)
         except asyncio.TimeoutError:
-            yield ": ping\n\n"  # SSE comment — keeps proxy connections alive
+            yield ": ping\n\n"
             continue
 
         if events.is_sentinel(item):
             break
 
         event_type = item.get("type", "progress")
+        yield _sse("progress", item)
         if event_type in ("complete", "error"):
-            yield _sse("progress", item)
             break
-        else:
-            yield _sse("progress", item)
