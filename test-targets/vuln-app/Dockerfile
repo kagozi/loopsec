@@ -7,5 +7,9 @@ COPY . .
 
 RUN mkdir -p uploads
 
+# Create a non-root user and switch to it
+RUN useradd -m appuser
+USER appuser
+
 EXPOSE 5003
 CMD ["python", "app.py"]
