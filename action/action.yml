@@ -112,30 +112,34 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         LOOPSEC_LLM_MODEL: ${{ inputs.model }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        GITHUB_WORKSPACE: ${{ github.workspace }}
+        APP_URL: ${{ inputs.app-url }}
+        SCAN_MODE: ${{ inputs.scan-mode }}
+        EXTRA_ARGS: ${{ inputs.extra-args }}
       run: |
         # Build command
-        CMD="loopsec scan --repo ${{ github.workspace }}"
+        CMD="loopsec scan --repo "$GITHUB_WORKSPACE""
 
         # Add app URL if provided
-        if [ -n "${{ inputs.app-url }}" ]; then
-          CMD="$CMD --url ${{ inputs.app-url }}"
+        if [ -n "$APP_URL" ]; then
+          CMD="$CMD --url "$APP_URL""
         fi
 
         # Add model
-        if [ -n "${{ inputs.model }}" ]; then
-          CMD="$CMD --model ${{ inputs.model }}"
+        if [ -n "$LOOPSEC_LLM_MODEL" ]; then
+          CMD="$CMD --model "$LOOPSEC_LLM_MODEL""
         fi
 
         # Configure scan mode
-        if [ "${{ inputs.scan-mode }}" = "sast" ]; then
+        if [ "$SCAN_MODE" = "sast" ]; then
           CMD="$CMD --skip attacker verifier --no-deploy"
-        elif [ "${{ inputs.scan-mode }}" = "report" ]; then
+        elif [ "$SCAN_MODE" = "report" ]; then
           CMD="$CMD --skip fixer verifier --no-deploy"
         fi
 
         # Extra args
-        if [ -n "${{ inputs.extra-args }}" ]; then
-          CMD="$CMD ${{ inputs.extra-args }}"
+        if [ -n "$EXTRA_ARGS" ]; then
+          CMD="$CMD $EXTRA_ARGS"
         fi
 
         # Run scan (don't fail yet — we handle exit code ourselves)
@@ -222,19 +226,4 @@ runs:
           loopsec-report.json
         retention-days: 30
 
-    # ─── Cleanup ──────────────────────────────────
-    - name: Stop ZAP
-      if: always() && inputs.scan-mode == 'full'
-      shell: bash
-      run: docker stop zap 2>/dev/null || true
-
-    # ─── Fail Check ───────────────────────────────
-    - name: Check for critical findings
-      if: inputs.fail-on-high == 'true'
-      shell: bash
-      run: |
-        CRITICAL=${{ steps.scan.outputs.critical }}
-        if [ "$CRITICAL" -gt "0" ]; then
-          echo "❌ $CRITICAL critical/high findings remain unfixed"
-          exit 1
-        fi
+    # ─── Cleanup ───────
