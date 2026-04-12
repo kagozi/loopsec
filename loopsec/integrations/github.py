@@ -256,3 +256,33 @@ class GitHubClient:
             f"/repos/{owner}/{repo}/check-runs/{check_run_id}",
             json=payload,
         )
+
+    def create_webhook(
+        self,
+        owner: str,
+        repo: str,
+        url: str,
+        secret: str,
+        events: list[str] | None = None,
+    ) -> int:
+        """Register a webhook on owner/repo. Returns the webhook ID."""
+        data = self._post(f"/repos/{owner}/{repo}/hooks", json={
+            "name": "web",
+            "active": True,
+            "events": events or ["push"],
+            "config": {
+                "url": url,
+                "content_type": "json",
+                "secret": secret,
+                "insecure_ssl": "0",
+            },
+        })
+        return data["id"]
+
+    def delete_webhook(self, owner: str, repo: str, webhook_id: int) -> bool:
+        """Delete a webhook. Returns True on success."""
+        try:
+            resp = self.client.delete(f"/repos/{owner}/{repo}/hooks/{webhook_id}")
+            return resp.status_code == 204
+        except Exception:
+            return False

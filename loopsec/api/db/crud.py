@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from loopsec.api.db.models import ExploitORM, FindingORM, PatchORM, PullRequestORM, ScanORM, UserORM
+from loopsec.api.db.models import ExploitORM, FindingORM, PatchORM, PullRequestORM, ScanORM, UserORM, ProtectedBranchORM
 from loopsec.core.models import PipelineState, PipelineStatus
 
 
@@ -506,3 +506,108 @@ def list_pull_requests(
     total = db.execute(count_stmt).scalar_one()
     rows = db.execute(stmt.order_by(PullRequestORM.created_at.desc()).offset(offset).limit(limit)).scalars().all()
     return [_pr_to_dict(r) for r in rows], total
+
+
+# ---------------------------------------------------------------------------
+# Protected Branches
+# ---------------------------------------------------------------------------
+
+def _pb_to_dict(pb: ProtectedBranchORM) -> dict:
+    return {
+        "id": pb.id,
+        "user_id": pb.user_id,
+        "github_repo": pb.github_repo,
+        "branch": pb.branch,
+        "enabled": pb.enabled,
+        "webhook_id": pb.webhook_id,
+        "created_at": pb.created_at.isoformat() if pb.created_at else None,
+    }
+
+
+def create_protected_branch(
+    db: Session,
+    *,
+    user_id: str,
+    github_repo: str,
+    branch: str,
+    webhook_id: int | None = None,
+    webhook_secret: str | None = None,
+) -> ProtectedBranchORM:
+    now = datetime.now(timezone.utc)
+    pb = ProtectedBranchORM(
+        id=uuid.uuid4().hex[:12],
+        user_id=user_id,
+        github_repo=github_repo,
+        branch=branch,
+        enabled=True,
+        webhook_id=webhook_id,
+        webhook_secret=webhook_secret,
+        created_at=now,
+    )
+    db.add(pb)
+    db.commit()
+    db.refresh(pb)
+    return pb
+
+
+def get_protected_branch(db: Session, pb_id: str) -> ProtectedBranchORM | None:
+    return db.get(ProtectedBranchORM, pb_id)
+
+
+def list_protected_branches(db: Session, user_id: str) -> list[dict]:
+    rows = db.execute(
+        select(ProtectedBranchORM)
+        .where(ProtectedBranchORM.user_id == user_id)
+        .order_by(ProtectedBranchORM.created_at.desc())
+    ).scalars().all()
+    return [_pb_to_dict(r) for r in rows]
+
+
+def update_protected_branch_enabled(db: Session, pb_id: str, enabled: bool) -> ProtectedBranchORM | None:
+    row = db.get(ProtectedBranchORM, pb_id)
+    if row:
+        row.enabled = enabled
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def set_protected_branch_webhook(db: Session, pb_id: str, webhook_id: int, webhook_secret: str) -> None:
+    row = db.get(ProtectedBranchORM, pb_id)
+    if row:
+        row.webhook_id = webhook_id
+        row.webhook_secret = webhook_secret
+        db.commit()
+
+
+def delete_protected_branch(db: Session, pb_id: str) -> ProtectedBranchORM | None:
+    """Delete and return the record (caller may need webhook_id to unregister)."""
+    row = db.get(ProtectedBranchORM, pb_id)
+    if row:
+        db.delete(row)
+        db.commit()
+    return row
+
+
+def count_protections_for_repo(db: Session, user_id: str, github_repo: str) -> int:
+    """How many protections still exist for this user+repo (used to decide whether to delete the webhook)."""
+    return db.execute(
+        select(func.count())
+        .select_from(ProtectedBranchORM)
+        .where(
+            ProtectedBranchORM.user_id == user_id,
+            ProtectedBranchORM.github_repo == github_repo,
+        )
+    ).scalar_one()
+
+
+def get_protections_for_push(db: Session, github_repo: str, branch: str) -> list[ProtectedBranchORM]:
+    """Return all enabled protections triggered by a push to repo@branch."""
+    return db.execute(
+        select(ProtectedBranchORM)
+        .where(
+            ProtectedBranchORM.github_repo == github_repo,
+            ProtectedBranchORM.branch == branch,
+            ProtectedBranchORM.enabled == True,  # noqa: E712
+        )
+    ).scalars().all()

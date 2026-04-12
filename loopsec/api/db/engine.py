@@ -80,3 +80,18 @@ def run_migrations() -> None:
                 )
             """))
             conn.commit()
+
+        if "protected_branches" not in tables:
+            conn.execute(text("""
+                CREATE TABLE protected_branches (
+                    id VARCHAR(12) PRIMARY KEY,
+                    user_id VARCHAR(12) NOT NULL REFERENCES users(id),
+                    github_repo VARCHAR(255) NOT NULL,
+                    branch VARCHAR(255) NOT NULL,
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    webhook_id INTEGER,
+                    webhook_secret TEXT,
+                    created_at DATETIME NOT NULL
+                )
+            """))
+            conn.commit()
