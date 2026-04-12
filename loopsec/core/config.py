@@ -63,6 +63,7 @@ class Config(BaseModel):
                 semgrep_rules=os.getenv("LOOPSEC_SEMGREP_RULES", "auto"),
                 zap_host=os.getenv("ZAP_HOST", "http://localhost:8080"),
             ),
+            work_dir=Path(os.getenv("LOOPSEC_WORK_DIR", str(Path.home() / ".loopsec"))),
             log_level=os.getenv("LOOPSEC_LOG_LEVEL", "INFO"),
         )
 
