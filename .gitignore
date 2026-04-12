@@ -17,3 +17,7 @@ loopsec-report-*
 node_modules/
 *.db
 .DS_Store
+generate_pitch_pdf.py
+LoopSec_Pitch_Script.pdf
+LOVEABLE_PROMPT.md
+main.py
