@@ -23,6 +23,10 @@ RUN pip install --no-cache-dir ".[api]"
 RUN mkdir -p /data
 ENV LOOPSEC_WORK_DIR=/data
 
+# Create a non-root user and switch to it
+RUN useradd -m appuser
+USER appuser
+
 EXPOSE 8000
 
 CMD ["uvicorn", "loopsec.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

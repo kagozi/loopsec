@@ -1,3 +1,4 @@
+
 """
 Streaming endpoints — SSE and WebSocket.
 
@@ -140,7 +141,7 @@ async def scan_websocket(
     WebSocket stream for a scan.
 
     Connect with:
-        new WebSocket(`ws://host/scans/${scanId}/ws?token=${jwt}`)
+        new WebSocket(`wss://host/scans/${scanId}/ws?token=${jwt}`)
 
     Messages are JSON objects identical to the SSE event payloads:
         {"type": "status_change", "status": "analyzing"}
@@ -244,13 +245,4 @@ async def _ws_stream_live(ws: WebSocket, scan_id: str) -> None:
                 await _ws_send(ws, {"type": "ping"})
                 continue
 
-            if events.is_sentinel(item):
-                break
-
-            await _ws_send(ws, item)
-
-            event_type = item.get("type", "")
-            if event_type in ("complete", "error"):
-                break
-    finally:
-        events.unsubscribe(scan_id, q)
+         
