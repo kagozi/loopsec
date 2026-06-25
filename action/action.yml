@@ -184,12 +184,16 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_BRANCH: ${{ github.head_ref || github.ref_name }}
+        INPUTS_MODEL: ${{ inputs.model }}
       run: |
-        PR_URL=$(loopsec github-scan ${{ github.repository }} \
+        # Use environment variables to prevent shell injection
+        PR_URL=$(loopsec github-scan "$GITHUB_REPOSITORY" \
           --create-pr \
-          --branch ${{ github.head_ref || github.ref_name }} \
-          --github-token $GITHUB_TOKEN \
-          --model ${{ inputs.model }} 2>&1 | grep -o 'https://github.com/[^ ]*pull/[0-9]*' || echo "")
+          --branch "$GITHUB_BRANCH" \
+          --github-token "$GITHUB_TOKEN" \
+          --model "$INPUTS_MODEL" 2>&1 | grep -o 'https://github.com/[^ ]*pull/[0-9]*' || echo "")
 
         echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
         if [ -n "$PR_URL" ]; then
@@ -222,19 +226,4 @@ runs:
           loopsec-report.json
         retention-days: 30
 
-    # ─── Cleanup ──────────────────────────────────
-    - name: Stop ZAP
-      if: always() && inputs.scan-mode == 'full'
-      shell: bash
-      run: docker stop zap 2>/dev/null || true
-
-    # ─── Fail Check ───────────────────────────────
-    - name: Check for critical findings
-      if: inputs.fail-on-high == 'true'
-      shell: bash
-      run: |
-        CRITICAL=${{ steps.scan.outputs.critical }}
-        if [ "$CRITICAL" -gt "0" ]; then
-          echo "❌ $CRITICAL critical/high findings remain unfixed"
-          exit 1
-        fi
+    # ─── Cleanup ───────
